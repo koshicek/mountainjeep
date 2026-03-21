@@ -85,7 +85,7 @@ canvas {
 <div id="ui-overlay">
   <h1>🏔️ Jeep Mountain Run</h1>
   <h2>Terénní dobrodružství</h2>
-  <p>⬆️ Skok &nbsp; ⬇️ Brzda &nbsp; ⬅️➡️ Pohyb</p>
+  <p>⬆️ Skok &nbsp; ⬅️➡️ Přepínání pruhů &nbsp; ⬇️ Brzda</p>
   <p class="start-hint">Stiskni ENTER pro start</p>
 </div>
 
@@ -137,6 +137,7 @@ const jeep = {
   onIce: false,
   tilt: 0,
   wheelAngle: 0,
+  laneKeyHeld: false,
 };
 
 // Road & terrain
@@ -228,6 +229,7 @@ function startGame() {
   jeep.onMud = false;
   jeep.onIce = false;
   jeep.tilt = 0;
+  jeep.laneKeyHeld = false;
   jeep.groundY = jeep.y;
   shakeTimer = 0;
   initMountains();
@@ -651,24 +653,65 @@ function updateParallax() {
 function updateJeep() {
   // Lane movement
   const targetY = ROAD_Y + jeep.lane * LANE_H + (LANE_H - jeep.h) / 2;
-  const moveSpeed = jeep.onIce ? 1.5 : (jeep.onMud ? 2.5 : 4);
 
-  if (keys['ArrowUp'] && jeep.grounded) {
-    if (jeep.lane > 0) {
+  // ArrowLeft/Right = switch lanes
+  if (keys['ArrowLeft'] && jeep.grounded && !jeep.laneKeyHeld) {
+    if (jeep.onIce || jeep.onMud) {
+      // Slippery: random chance to overshoot or undershoot
+      const slip = Math.random();
+      if (slip < 0.3 && jeep.lane > 1) {
+        jeep.lane -= 2; // overshoot
+      } else if (slip < 0.5) {
+        // no movement - slip!
+      } else if (jeep.lane > 0) {
+        jeep.lane--;
+      }
+    } else if (jeep.lane > 0) {
       jeep.lane--;
     }
+    jeep.laneKeyHeld = true;
   }
-  if (keys['ArrowDown'] && jeep.grounded) {
-    if (jeep.lane < 2) {
+  if (keys['ArrowRight'] && jeep.grounded && !jeep.laneKeyHeld) {
+    if (jeep.onIce || jeep.onMud) {
+      const slip = Math.random();
+      if (slip < 0.3 && jeep.lane < 1) {
+        jeep.lane += 2; // overshoot
+      } else if (slip < 0.5) {
+        // no movement - slip!
+      } else if (jeep.lane < 2) {
+        jeep.lane++;
+      }
+    } else if (jeep.lane < 2) {
       jeep.lane++;
     }
+    jeep.laneKeyHeld = true;
+  }
+  if (!keys['ArrowLeft'] && !keys['ArrowRight']) {
+    jeep.laneKeyHeld = false;
   }
 
-  // Jump (space or quick up press when already at top lane)
+  // ArrowUp = jump
+  if (keys['ArrowUp'] && jeep.grounded) {
+    jeep.vy = -10;
+    jeep.grounded = false;
+    jeep.tilt = -0.15;
+    keys['ArrowUp'] = false; // prevent holding
+  }
+
+  // Space also jumps
   if (keys[' '] && jeep.grounded) {
     jeep.vy = -10;
     jeep.grounded = false;
     jeep.tilt = -0.15;
+    keys[' '] = false;
+  }
+
+  // ArrowDown = brake
+  if (keys['ArrowDown']) {
+    speed = Math.max(baseSpeed * 0.4, speed - 0.12);
+  } else {
+    // Speed recovery
+    speed += (baseSpeed - speed) * 0.02;
   }
 
   // Gravity
@@ -695,23 +738,22 @@ function updateJeep() {
       }
     }
   } else {
-    // Smooth lane transition
+    // Smooth lane transition — slippery surfaces slide slower/faster
+    const laneSpeed = jeep.onIce ? 0.06 : (jeep.onMud ? 0.08 : 0.15);
     const diff = targetY - jeep.y;
-    jeep.y += diff * 0.15 * moveSpeed / 4;
+    jeep.y += diff * laneSpeed;
     jeep.groundY = jeep.y;
-  }
 
-  // Brake - slow down
-  if (keys['ArrowLeft']) {
-    speed = Math.max(baseSpeed * 0.5, speed - 0.1);
-  }
-  if (keys['ArrowRight']) {
-    speed = Math.min(baseSpeed * 1.3, speed + 0.05);
-  }
-
-  // Speed recovery
-  if (!keys['ArrowLeft'] && !keys['ArrowRight']) {
-    speed += (baseSpeed - speed) * 0.02;
+    // Ice: random lateral drift
+    if (jeep.onIce && frameCount % 30 === 0 && Math.random() < 0.4) {
+      const drift = Math.random() < 0.5 ? -1 : 1;
+      jeep.lane = Math.max(0, Math.min(2, jeep.lane + drift));
+    }
+    // Mud: random lane wobble
+    if (jeep.onMud && frameCount % 40 === 0 && Math.random() < 0.3) {
+      const drift = Math.random() < 0.5 ? -1 : 1;
+      jeep.lane = Math.max(0, Math.min(2, jeep.lane + drift));
+    }
   }
 
   // Water slowdown
@@ -730,17 +772,25 @@ function updateJeep() {
     }
   }
 
-  // Mud effect
-  if (jeep.onMud && frameCount % 4 === 0) {
-    dustParticles.push({
-      x: jeep.x + 10 + Math.random() * 10,
-      y: jeep.y + jeep.h,
-      vx: -1 - Math.random() * 2,
-      vy: -Math.random() * 2,
-      size: 3 + Math.random() * 3,
-      alpha: 0.6,
-      r: 120, g: 90, b: 30,
-    });
+  // Mud slowdown + particles
+  if (jeep.onMud) {
+    speed = Math.max(baseSpeed * 0.5, speed - 0.04);
+    if (frameCount % 4 === 0) {
+      dustParticles.push({
+        x: jeep.x + 10 + Math.random() * 10,
+        y: jeep.y + jeep.h,
+        vx: -1 - Math.random() * 2,
+        vy: -Math.random() * 2,
+        size: 3 + Math.random() * 3,
+        alpha: 0.6,
+        r: 120, g: 90, b: 30,
+      });
+    }
+  }
+
+  // Ice: speed stays but no braking effectiveness
+  if (jeep.onIce && keys['ArrowDown']) {
+    speed = Math.max(baseSpeed * 0.8, speed); // brakes barely work on ice
   }
 
   // Regular dust
@@ -886,12 +936,14 @@ function updateParticles() {
 
 function updateDifficulty() {
   score = Math.floor(frameCount * speed * 0.15);
-  const newLevel = Math.floor(score / 500) + 1;
-  if (newLevel > level && newLevel <= 10) {
+  const newLevel = Math.floor(score / 300) + 1;
+  if (newLevel > level && newLevel <= 15) {
     level = newLevel;
-    baseSpeed = 3 + (level - 1) * 0.5;
+    baseSpeed = 3 + (level - 1) * 0.7;
     if (jeep.hp < jeep.maxHp) jeep.hp++; // Heal on level up
   }
+  // Continuous subtle speed increase between levels
+  baseSpeed += 0.0005;
 
   hudScore.textContent = `Vzdálenost: ${score} m`;
   hudSpeed.textContent = `Rychlost: ${Math.floor(60 + (speed - 3) * 15)} km/h`;
