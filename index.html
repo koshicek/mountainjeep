@@ -772,25 +772,88 @@ function updateJeep() {
     }
   }
 
-  // Mud slowdown + particles
+  // Mud slowdown + heavy splashing
   if (jeep.onMud) {
     speed = Math.max(baseSpeed * 0.5, speed - 0.04);
-    if (frameCount % 4 === 0) {
+    // Constant mud spray from wheels
+    for (let i = 0; i < 3; i++) {
       dustParticles.push({
-        x: jeep.x + 10 + Math.random() * 10,
-        y: jeep.y + jeep.h,
-        vx: -1 - Math.random() * 2,
-        vy: -Math.random() * 2,
-        size: 3 + Math.random() * 3,
+        x: jeep.x + 10 + Math.random() * 15,
+        y: jeep.y + jeep.h - 5,
+        vx: -2 - Math.random() * 4,
+        vy: -1 - Math.random() * 5,
+        size: 3 + Math.random() * 5,
+        alpha: 0.7 + Math.random() * 0.3,
+        r: 100 + Math.floor(Math.random() * 40),
+        g: 60 + Math.floor(Math.random() * 30),
+        b: 10 + Math.floor(Math.random() * 20),
+      });
+    }
+    // Big splashes from front wheel
+    if (frameCount % 2 === 0) {
+      for (let i = 0; i < 2; i++) {
+        dustParticles.push({
+          x: jeep.x + 50 + Math.random() * 10,
+          y: jeep.y + jeep.h - 3,
+          vx: 1 + Math.random() * 3,
+          vy: -3 - Math.random() * 6,
+          size: 4 + Math.random() * 6,
+          alpha: 0.8,
+          r: 80 + Math.floor(Math.random() * 30),
+          g: 50 + Math.floor(Math.random() * 20),
+          b: 5 + Math.floor(Math.random() * 15),
+        });
+      }
+    }
+    // Side splatter
+    if (frameCount % 3 === 0) {
+      dustParticles.push({
+        x: jeep.x + 20 + Math.random() * 30,
+        y: jeep.y + Math.random() * jeep.h,
+        vx: (Math.random() - 0.5) * 6,
+        vy: -2 - Math.random() * 3,
+        size: 2 + Math.random() * 4,
         alpha: 0.6,
-        r: 120, g: 90, b: 30,
+        r: 110, g: 75, b: 20,
       });
     }
   }
 
-  // Ice: speed stays but no braking effectiveness
-  if (jeep.onIce && keys['ArrowDown']) {
-    speed = Math.max(baseSpeed * 0.8, speed); // brakes barely work on ice
+  // Ice: speed stays but no braking effectiveness + snow particles
+  if (jeep.onIce) {
+    if (keys['ArrowDown']) {
+      speed = Math.max(baseSpeed * 0.8, speed); // brakes barely work on ice
+    }
+    // Snowflakes kicked up from wheels
+    for (let i = 0; i < 2; i++) {
+      dustParticles.push({
+        x: jeep.x + 5 + Math.random() * 15,
+        y: jeep.y + jeep.h - 2,
+        vx: -1 - Math.random() * 3,
+        vy: -1 - Math.random() * 3,
+        size: 2 + Math.random() * 3,
+        alpha: 0.6 + Math.random() * 0.4,
+        r: 220 + Math.floor(Math.random() * 35),
+        g: 230 + Math.floor(Math.random() * 25),
+        b: 245 + Math.floor(Math.random() * 10),
+      });
+    }
+    // Falling snow across the screen
+    if (frameCount % 2 === 0) {
+      for (let i = 0; i < 3; i++) {
+        dustParticles.push({
+          x: Math.random() * 900,
+          y: ROAD_Y - 10 - Math.random() * 20,
+          vx: -speed * 0.3 + (Math.random() - 0.5) * 2,
+          vy: 1 + Math.random() * 2,
+          size: 1.5 + Math.random() * 3,
+          alpha: 0.5 + Math.random() * 0.5,
+          r: 230 + Math.floor(Math.random() * 25),
+          g: 235 + Math.floor(Math.random() * 20),
+          b: 250,
+        });
+      }
+    }
   }
 
   // Regular dust
