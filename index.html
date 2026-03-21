@@ -1,0 +1,958 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jeep Mountain Run</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #1a1a2e;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  font-family: 'Segoe UI', sans-serif;
+  overflow: hidden;
+}
+canvas {
+  border-radius: 8px;
+  box-shadow: 0 0 40px rgba(0,0,0,0.5);
+}
+#ui-overlay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  color: white;
+  pointer-events: none;
+  z-index: 10;
+}
+#ui-overlay.hidden { display: none; }
+#ui-overlay h1 {
+  font-size: 48px;
+  text-shadow: 3px 3px 6px rgba(0,0,0,0.7);
+  margin-bottom: 10px;
+}
+#ui-overlay h2 {
+  font-size: 28px;
+  text-shadow: 2px 2px 4px rgba(0,0,0,0.7);
+  margin-bottom: 20px;
+  color: #ffd700;
+}
+#ui-overlay p {
+  font-size: 18px;
+  text-shadow: 1px 1px 3px rgba(0,0,0,0.7);
+  margin-bottom: 8px;
+}
+#ui-overlay .start-hint {
+  font-size: 22px;
+  margin-top: 30px;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+#hud {
+  position: absolute;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 30px;
+  color: white;
+  font-size: 18px;
+  font-weight: bold;
+  text-shadow: 2px 2px 4px rgba(0,0,0,0.7);
+  z-index: 5;
+}
+#hud.hidden { display: none; }
+#hud span { background: rgba(0,0,0,0.4); padding: 8px 16px; border-radius: 20px; }
+</style>
+</head>
+<body>
+
+<canvas id="game" width="900" height="500"></canvas>
+
+<div id="hud" class="hidden">
+  <span id="hud-score">Vzdálenost: 0 m</span>
+  <span id="hud-speed">Rychlost: 60 km/h</span>
+  <span id="hud-level">Úroveň: 1</span>
+</div>
+
+<div id="ui-overlay">
+  <h1>🏔️ Jeep Mountain Run</h1>
+  <h2>Terénní dobrodružství</h2>
+  <p>⬆️ Skok &nbsp; ⬇️ Brzda &nbsp; ⬅️➡️ Pohyb</p>
+  <p class="start-hint">Stiskni ENTER pro start</p>
+</div>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const overlay = document.getElementById('ui-overlay');
+const hud = document.getElementById('hud');
+const hudScore = document.getElementById('hud-score');
+const hudSpeed = document.getElementById('hud-speed');
+const hudLevel = document.getElementById('hud-level');
+
+// Game state
+const STATE = { MENU: 0, PLAYING: 1, GAMEOVER: 2 };
+let state = STATE.MENU;
+let score = 0;
+let speed = 3;
+let baseSpeed = 3;
+let level = 1;
+let frameCount = 0;
+let lastObstacleX = 900;
+let shakeTimer = 0;
+let shakeIntensity = 0;
+let particles = [];
+let dustParticles = [];
+let splashParticles = [];
+
+// Keys
+const keys = {};
+window.addEventListener('keydown', e => {
+  keys[e.key] = true;
+  if (e.key === 'Enter') {
+    if (state === STATE.MENU || state === STATE.GAMEOVER) startGame();
+  }
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
+});
+window.addEventListener('keyup', e => keys[e.key] = false);
+
+// Jeep
+const jeep = {
+  x: 150, y: 0, w: 70, h: 45,
+  vy: 0, grounded: true,
+  groundY: 0,
+  lane: 1, // 0=top, 1=mid, 2=bottom
+  hp: 3, maxHp: 3,
+  invincible: 0,
+  inWater: false,
+  onMud: false,
+  onIce: false,
+  tilt: 0,
+  wheelAngle: 0,
+};
+
+// Road & terrain
+const ROAD_Y = 340;
+const ROAD_H = 100;
+const LANE_H = ROAD_H / 3;
+
+// Mountains (parallax layers)
+let mountains1 = [];
+let mountains2 = [];
+let clouds = [];
+let trees = [];
+
+function initMountains() {
+  mountains1 = [];
+  mountains2 = [];
+  clouds = [];
+  trees = [];
+  for (let i = 0; i < 8; i++) {
+    mountains1.push({ x: i * 200 - 100, w: 250, h: 100 + Math.random() * 80 });
+    mountains2.push({ x: i * 160 - 50, w: 200, h: 60 + Math.random() * 50 });
+  }
+  for (let i = 0; i < 6; i++) {
+    clouds.push({ x: Math.random() * 900, y: 30 + Math.random() * 60, w: 60 + Math.random() * 40 });
+  }
+  for (let i = 0; i < 12; i++) {
+    trees.push({ x: Math.random() * 1000, h: 30 + Math.random() * 25, type: Math.floor(Math.random() * 3) });
+  }
+}
+
+// Obstacles
+let obstacles = [];
+const OBSTACLE_TYPES = {
+  ROCK: { name: 'Kámen', color: '#666', minLevel: 1, lanes: [0,1,2], w: 35, h: 30 },
+  LOG: { name: 'Kláda', color: '#8B4513', minLevel: 1, lanes: [0,1,2], w: 60, h: 20 },
+  WATER: { name: 'Brod', color: '#3498db', minLevel: 2, lanes: [0,1,2], w: 120, h: ROAD_H, fullWidth: true },
+  MUD: { name: 'Bláto', color: '#8B6914', minLevel: 2, lanes: [0,1,2], w: 100, h: ROAD_H, fullWidth: true },
+  GAP: { name: 'Propast', color: '#1a1a2e', minLevel: 3, lanes: [0,1,2], w: 80, h: ROAD_H, fullWidth: true, deadly: true },
+  ICE: { name: 'Led', color: '#a8d8ea', minLevel: 3, lanes: [0,1,2], w: 110, h: ROAD_H, fullWidth: true },
+  BOULDER: { name: 'Balvan', color: '#555', minLevel: 4, lanes: [0,1,2], w: 45, h: 40 },
+  FALLEN_TREE: { name: 'Padlý strom', color: '#5D4037', minLevel: 4, lanes: [0,1], w: 80, h: 55, tall: true },
+  RAMP: { name: 'Rampa', color: '#FF8C00', minLevel: 2, lanes: [1], w: 50, h: 25, isRamp: true },
+};
+
+function getAvailableTypes() {
+  return Object.entries(OBSTACLE_TYPES).filter(([,v]) => v.minLevel <= level);
+}
+
+function spawnObstacle() {
+  const available = getAvailableTypes();
+  const [key, type] = available[Math.floor(Math.random() * available.length)];
+  const lane = type.fullWidth ? -1 : type.lanes[Math.floor(Math.random() * type.lanes.length)];
+  const y = type.fullWidth ? ROAD_Y : ROAD_Y + lane * LANE_H + (LANE_H - type.h) / 2;
+
+  obstacles.push({
+    x: 950,
+    y: y,
+    w: type.w,
+    h: type.fullWidth ? ROAD_H : type.h,
+    type: key,
+    color: type.color,
+    fullWidth: type.fullWidth || false,
+    deadly: type.deadly || false,
+    isRamp: type.isRamp || false,
+    tall: type.tall || false,
+    passed: false,
+  });
+}
+
+function startGame() {
+  state = STATE.PLAYING;
+  score = 0;
+  speed = 3;
+  baseSpeed = 3;
+  level = 1;
+  frameCount = 0;
+  lastObstacleX = 900;
+  obstacles = [];
+  particles = [];
+  dustParticles = [];
+  splashParticles = [];
+  jeep.y = ROAD_Y + LANE_H + (LANE_H - jeep.h) / 2;
+  jeep.lane = 1;
+  jeep.vy = 0;
+  jeep.grounded = true;
+  jeep.hp = 3;
+  jeep.invincible = 0;
+  jeep.inWater = false;
+  jeep.onMud = false;
+  jeep.onIce = false;
+  jeep.tilt = 0;
+  jeep.groundY = jeep.y;
+  shakeTimer = 0;
+  initMountains();
+  overlay.classList.add('hidden');
+  hud.classList.remove('hidden');
+}
+
+function gameOver() {
+  state = STATE.GAMEOVER;
+  hud.classList.add('hidden');
+  overlay.classList.remove('hidden');
+  overlay.innerHTML = `
+    <h1>💥 Konec jízdy!</h1>
+    <h2>Vzdálenost: ${score} m</h2>
+    <p>Úroveň: ${level} | Rychlost: ${Math.floor(60 + (speed - 3) * 15)} km/h</p>
+    <p class="start-hint">Stiskni ENTER pro novou hru</p>
+  `;
+}
+
+// Drawing functions
+function drawSky() {
+  const grad = ctx.createLinearGradient(0, 0, 0, ROAD_Y);
+  grad.addColorStop(0, '#87CEEB');
+  grad.addColorStop(0.6, '#B0E0E6');
+  grad.addColorStop(1, '#E0F0E0');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 900, ROAD_Y);
+}
+
+function drawClouds() {
+  ctx.fillStyle = 'rgba(255,255,255,0.8)';
+  clouds.forEach(c => {
+    ctx.beginPath();
+    ctx.ellipse(c.x, c.y, c.w / 2, 15, 0, 0, Math.PI * 2);
+    ctx.ellipse(c.x - 15, c.y + 5, c.w / 3, 12, 0, 0, Math.PI * 2);
+    ctx.ellipse(c.x + 18, c.y + 3, c.w / 3, 10, 0, 0, Math.PI * 2);
+    ctx.fill();
+  });
+}
+
+function drawMountains() {
+  // Far mountains
+  ctx.fillStyle = '#7B9EA8';
+  mountains1.forEach(m => {
+    ctx.beginPath();
+    ctx.moveTo(m.x, ROAD_Y);
+    ctx.lineTo(m.x + m.w / 2, ROAD_Y - m.h);
+    ctx.lineTo(m.x + m.w, ROAD_Y);
+    ctx.fill();
+  });
+  // Snow caps
+  ctx.fillStyle = '#E8E8E8';
+  mountains1.forEach(m => {
+    ctx.beginPath();
+    const peakX = m.x + m.w / 2;
+    const peakY = ROAD_Y - m.h;
+    ctx.moveTo(peakX, peakY);
+    ctx.lineTo(peakX - 20, peakY + 20);
+    ctx.lineTo(peakX + 20, peakY + 20);
+    ctx.fill();
+  });
+  // Near mountains
+  ctx.fillStyle = '#5A7A5A';
+  mountains2.forEach(m => {
+    ctx.beginPath();
+    ctx.moveTo(m.x, ROAD_Y);
+    ctx.lineTo(m.x + m.w / 2, ROAD_Y - m.h);
+    ctx.lineTo(m.x + m.w, ROAD_Y);
+    ctx.fill();
+  });
+}
+
+function drawTrees() {
+  trees.forEach(t => {
+    const baseY = ROAD_Y - 2;
+    // Trunk
+    ctx.fillStyle = '#5D4037';
+    ctx.fillRect(t.x + 4, baseY - t.h * 0.4, 6, t.h * 0.4);
+    // Foliage
+    ctx.fillStyle = t.type === 0 ? '#2E7D32' : t.type === 1 ? '#388E3C' : '#1B5E20';
+    ctx.beginPath();
+    ctx.moveTo(t.x + 7, baseY - t.h);
+    ctx.lineTo(t.x - 5, baseY - t.h * 0.3);
+    ctx.lineTo(t.x + 19, baseY - t.h * 0.3);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(t.x + 7, baseY - t.h * 0.7);
+    ctx.lineTo(t.x - 8, baseY - t.h * 0.1);
+    ctx.lineTo(t.x + 22, baseY - t.h * 0.1);
+    ctx.fill();
+  });
+}
+
+function drawRoad() {
+  // Road base
+  ctx.fillStyle = '#555';
+  ctx.fillRect(0, ROAD_Y, 900, ROAD_H);
+
+  // Road edges
+  ctx.fillStyle = '#444';
+  ctx.fillRect(0, ROAD_Y, 900, 3);
+  ctx.fillRect(0, ROAD_Y + ROAD_H - 3, 900, 3);
+
+  // Lane markings
+  ctx.setLineDash([20, 15]);
+  ctx.strokeStyle = '#888';
+  ctx.lineWidth = 2;
+  for (let i = 1; i < 3; i++) {
+    ctx.beginPath();
+    ctx.moveTo(0, ROAD_Y + i * LANE_H);
+    ctx.lineTo(900, ROAD_Y + i * LANE_H);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  // Below road
+  const belowGrad = ctx.createLinearGradient(0, ROAD_Y + ROAD_H, 0, 500);
+  belowGrad.addColorStop(0, '#4A3728');
+  belowGrad.addColorStop(1, '#2D1F14');
+  ctx.fillStyle = belowGrad;
+  ctx.fillRect(0, ROAD_Y + ROAD_H, 900, 60);
+}
+
+function drawObstacle(obs) {
+  ctx.save();
+  switch (obs.type) {
+    case 'ROCK':
+      ctx.fillStyle = '#777';
+      ctx.beginPath();
+      ctx.ellipse(obs.x + obs.w/2, obs.y + obs.h/2 + 5, obs.w/2, obs.h/2.5, 0, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#999';
+      ctx.beginPath();
+      ctx.ellipse(obs.x + obs.w/2 - 3, obs.y + obs.h/2, obs.w/2.5, obs.h/3, -0.2, 0, Math.PI*2);
+      ctx.fill();
+      break;
+
+    case 'BOULDER':
+      ctx.fillStyle = '#666';
+      ctx.beginPath();
+      ctx.ellipse(obs.x + obs.w/2, obs.y + obs.h/2, obs.w/2, obs.h/2, 0, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#888';
+      ctx.beginPath();
+      ctx.ellipse(obs.x + obs.w/2 - 5, obs.y + obs.h/2 - 5, obs.w/4, obs.h/4, 0, 0, Math.PI*2);
+      ctx.fill();
+      break;
+
+    case 'LOG':
+      ctx.fillStyle = '#6D4C2B';
+      ctx.fillRect(obs.x, obs.y + 2, obs.w, obs.h - 4);
+      ctx.fillStyle = '#8B6914';
+      ctx.beginPath();
+      ctx.ellipse(obs.x, obs.y + obs.h/2, obs.h/2 - 2, obs.h/2 - 2, 0, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#5D3A1A';
+      ctx.beginPath();
+      ctx.arc(obs.x, obs.y + obs.h/2, 5, 0, Math.PI*2);
+      ctx.fill();
+      break;
+
+    case 'FALLEN_TREE':
+      // Trunk
+      ctx.fillStyle = '#5D4037';
+      ctx.save();
+      ctx.translate(obs.x + obs.w/2, obs.y + obs.h);
+      ctx.rotate(-0.5);
+      ctx.fillRect(-obs.w/2, -12, obs.w, 14);
+      ctx.restore();
+      // Branches
+      ctx.fillStyle = '#2E7D32';
+      ctx.beginPath();
+      ctx.arc(obs.x + obs.w - 10, obs.y + 10, 20, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#388E3C';
+      ctx.beginPath();
+      ctx.arc(obs.x + obs.w - 5, obs.y + 20, 15, 0, Math.PI*2);
+      ctx.fill();
+      break;
+
+    case 'WATER':
+      ctx.fillStyle = 'rgba(52, 152, 219, 0.5)';
+      ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
+      // Waves
+      ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+      ctx.lineWidth = 2;
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        for (let wx = obs.x; wx < obs.x + obs.w; wx += 5) {
+          const wy = obs.y + 20 + i * 30 + Math.sin((wx + frameCount * 3) * 0.08) * 5;
+          if (wx === obs.x) ctx.moveTo(wx, wy); else ctx.lineTo(wx, wy);
+        }
+        ctx.stroke();
+      }
+      break;
+
+    case 'MUD':
+      ctx.fillStyle = 'rgba(139, 105, 20, 0.6)';
+      ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
+      // Mud blobs
+      ctx.fillStyle = 'rgba(101, 67, 33, 0.5)';
+      for (let i = 0; i < 5; i++) {
+        const mx = obs.x + 15 + (i * 20) % obs.w;
+        const my = obs.y + 15 + (i * 25) % obs.h;
+        ctx.beginPath();
+        ctx.ellipse(mx, my, 8, 5, i, 0, Math.PI*2);
+        ctx.fill();
+      }
+      break;
+
+    case 'GAP':
+      ctx.fillStyle = '#1a1a2e';
+      ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
+      // Edges
+      ctx.fillStyle = '#3a2a1a';
+      ctx.fillRect(obs.x - 3, obs.y, 6, obs.h);
+      ctx.fillRect(obs.x + obs.w - 3, obs.y, 6, obs.h);
+      // Depth shading
+      const gapGrad = ctx.createLinearGradient(obs.x, obs.y, obs.x, obs.y + obs.h);
+      gapGrad.addColorStop(0, 'rgba(0,0,0,0)');
+      gapGrad.addColorStop(1, 'rgba(0,0,0,0.8)');
+      ctx.fillStyle = gapGrad;
+      ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
+      break;
+
+    case 'ICE':
+      ctx.fillStyle = 'rgba(168, 216, 234, 0.5)';
+      ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
+      // Shine
+      ctx.fillStyle = 'rgba(255,255,255,0.3)';
+      for (let i = 0; i < 4; i++) {
+        ctx.fillRect(obs.x + 10 + i * 25, obs.y + 10 + (i % 2) * 40, 15, 3);
+      }
+      break;
+
+    case 'RAMP':
+      ctx.fillStyle = '#FF8C00';
+      ctx.beginPath();
+      ctx.moveTo(obs.x, obs.y + obs.h);
+      ctx.lineTo(obs.x + obs.w, obs.y + obs.h);
+      ctx.lineTo(obs.x + obs.w, obs.y);
+      ctx.fill();
+      ctx.fillStyle = '#CC7000';
+      ctx.beginPath();
+      ctx.moveTo(obs.x, obs.y + obs.h);
+      ctx.lineTo(obs.x + obs.w * 0.7, obs.y + obs.h);
+      ctx.lineTo(obs.x + obs.w, obs.y + obs.h * 0.3);
+      ctx.lineTo(obs.x + obs.w, obs.y);
+      ctx.fill();
+      // Stripes
+      ctx.fillStyle = '#FFD700';
+      for (let i = 0; i < 3; i++) {
+        const sx = obs.x + 5 + i * 15;
+        ctx.fillRect(sx, obs.y + obs.h - 8, 8, 3);
+      }
+      break;
+  }
+  ctx.restore();
+}
+
+function drawJeep() {
+  ctx.save();
+  const jx = jeep.x;
+  const jy = jeep.y;
+
+  // Flash when invincible
+  if (jeep.invincible > 0 && Math.floor(frameCount / 4) % 2 === 0) {
+    ctx.globalAlpha = 0.4;
+  }
+
+  ctx.translate(jx + jeep.w/2, jy + jeep.h/2);
+  ctx.rotate(jeep.tilt);
+  ctx.translate(-jeep.w/2, -jeep.h/2);
+
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.ellipse(jeep.w/2, jeep.h + 5, jeep.w/2 - 5, 6, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // Body
+  ctx.fillStyle = '#2E7D32';
+  // Lower body
+  ctx.fillRect(5, 15, 60, 22);
+  // Upper body / cabin
+  ctx.fillStyle = '#388E3C';
+  ctx.fillRect(20, 4, 35, 16);
+  // Roof
+  ctx.fillStyle = '#1B5E20';
+  ctx.fillRect(22, 2, 31, 5);
+
+  // Windshield
+  ctx.fillStyle = 'rgba(135,206,250,0.7)';
+  ctx.beginPath();
+  ctx.moveTo(52, 5);
+  ctx.lineTo(57, 15);
+  ctx.lineTo(52, 15);
+  ctx.lineTo(52, 5);
+  ctx.fill();
+
+  // Rear window
+  ctx.fillStyle = 'rgba(135,206,250,0.5)';
+  ctx.fillRect(22, 6, 8, 10);
+
+  // Bumpers
+  ctx.fillStyle = '#444';
+  ctx.fillRect(0, 20, 8, 12);
+  ctx.fillRect(62, 20, 8, 12);
+
+  // Headlight
+  ctx.fillStyle = '#FFD700';
+  ctx.fillRect(63, 22, 5, 5);
+
+  // Tail light
+  ctx.fillStyle = '#FF0000';
+  ctx.fillRect(2, 22, 4, 4);
+
+  // Spare tire hint on back
+  ctx.fillStyle = '#333';
+  ctx.beginPath();
+  ctx.arc(5, 14, 6, 0, Math.PI*2);
+  ctx.fill();
+  ctx.fillStyle = '#555';
+  ctx.beginPath();
+  ctx.arc(5, 14, 3, 0, Math.PI*2);
+  ctx.fill();
+
+  // Wheels
+  jeep.wheelAngle += speed * 0.15;
+  const drawWheel = (wx, wy) => {
+    ctx.fillStyle = '#222';
+    ctx.beginPath();
+    ctx.arc(wx, wy, 9, 0, Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle = '#444';
+    ctx.beginPath();
+    ctx.arc(wx, wy, 5, 0, Math.PI*2);
+    ctx.fill();
+    // Spokes
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 1.5;
+    for (let s = 0; s < 4; s++) {
+      const angle = jeep.wheelAngle + s * Math.PI / 2;
+      ctx.beginPath();
+      ctx.moveTo(wx, wy);
+      ctx.lineTo(wx + Math.cos(angle) * 7, wy + Math.sin(angle) * 7);
+      ctx.stroke();
+    }
+  };
+  drawWheel(17, 40);
+  drawWheel(53, 40);
+
+  // Snorkel (exhaust pipe)
+  ctx.fillStyle = '#555';
+  ctx.fillRect(55, 0, 3, 8);
+
+  ctx.restore();
+}
+
+function drawParticles() {
+  // Dust particles
+  dustParticles.forEach(p => {
+    ctx.fillStyle = `rgba(${p.r},${p.g},${p.b},${p.alpha})`;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+    ctx.fill();
+  });
+  // Splash particles
+  splashParticles.forEach(p => {
+    ctx.fillStyle = `rgba(52,152,219,${p.alpha})`;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+    ctx.fill();
+  });
+  // Hit particles
+  particles.forEach(p => {
+    ctx.fillStyle = `rgba(255,${p.g},0,${p.alpha})`;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+    ctx.fill();
+  });
+}
+
+function drawHP() {
+  for (let i = 0; i < jeep.maxHp; i++) {
+    ctx.fillStyle = i < jeep.hp ? '#e74c3c' : '#444';
+    ctx.font = '22px sans-serif';
+    ctx.fillText('❤️', 20 + i * 28, 485);
+  }
+}
+
+function drawWarning(text) {
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fillRect(300, 200, 300, 50);
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 20px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(text, 450, 232);
+  ctx.textAlign = 'left';
+}
+
+// Update functions
+function updateParallax() {
+  mountains1.forEach(m => {
+    m.x -= speed * 0.3;
+    if (m.x + m.w < -50) m.x = 900 + Math.random() * 100;
+  });
+  mountains2.forEach(m => {
+    m.x -= speed * 0.6;
+    if (m.x + m.w < -50) m.x = 900 + Math.random() * 100;
+  });
+  clouds.forEach(c => {
+    c.x -= speed * 0.15;
+    if (c.x + c.w < -50) { c.x = 950; c.y = 30 + Math.random() * 60; }
+  });
+  trees.forEach(t => {
+    t.x -= speed * 0.8;
+    if (t.x < -30) { t.x = 920 + Math.random() * 100; t.h = 30 + Math.random() * 25; }
+  });
+}
+
+function updateJeep() {
+  // Lane movement
+  const targetY = ROAD_Y + jeep.lane * LANE_H + (LANE_H - jeep.h) / 2;
+  const moveSpeed = jeep.onIce ? 1.5 : (jeep.onMud ? 2.5 : 4);
+
+  if (keys['ArrowUp'] && jeep.grounded) {
+    if (jeep.lane > 0) {
+      jeep.lane--;
+    }
+  }
+  if (keys['ArrowDown'] && jeep.grounded) {
+    if (jeep.lane < 2) {
+      jeep.lane++;
+    }
+  }
+
+  // Jump (space or quick up press when already at top lane)
+  if (keys[' '] && jeep.grounded) {
+    jeep.vy = -10;
+    jeep.grounded = false;
+    jeep.tilt = -0.15;
+  }
+
+  // Gravity
+  if (!jeep.grounded) {
+    jeep.vy += 0.5;
+    jeep.y += jeep.vy;
+    jeep.tilt = jeep.vy * 0.02;
+    if (jeep.y >= jeep.groundY) {
+      jeep.y = jeep.groundY;
+      jeep.vy = 0;
+      jeep.grounded = true;
+      jeep.tilt = 0;
+      // Landing dust
+      for (let i = 0; i < 6; i++) {
+        dustParticles.push({
+          x: jeep.x + 15 + Math.random() * 40,
+          y: jeep.y + jeep.h,
+          vx: (Math.random() - 0.5) * 3,
+          vy: -Math.random() * 2,
+          size: 2 + Math.random() * 3,
+          alpha: 0.7,
+          r: 150, g: 130, b: 100,
+        });
+      }
+    }
+  } else {
+    // Smooth lane transition
+    const diff = targetY - jeep.y;
+    jeep.y += diff * 0.15 * moveSpeed / 4;
+    jeep.groundY = jeep.y;
+  }
+
+  // Brake - slow down
+  if (keys['ArrowLeft']) {
+    speed = Math.max(baseSpeed * 0.5, speed - 0.1);
+  }
+  if (keys['ArrowRight']) {
+    speed = Math.min(baseSpeed * 1.3, speed + 0.05);
+  }
+
+  // Speed recovery
+  if (!keys['ArrowLeft'] && !keys['ArrowRight']) {
+    speed += (baseSpeed - speed) * 0.02;
+  }
+
+  // Water slowdown
+  if (jeep.inWater) {
+    speed = Math.max(baseSpeed * 0.4, speed - 0.05);
+    // Water splash
+    if (frameCount % 3 === 0) {
+      splashParticles.push({
+        x: jeep.x + 60 + Math.random() * 10,
+        y: jeep.y + jeep.h - 5,
+        vx: 1 + Math.random() * 2,
+        vy: -2 - Math.random() * 4,
+        size: 2 + Math.random() * 2,
+        alpha: 0.8,
+      });
+    }
+  }
+
+  // Mud effect
+  if (jeep.onMud && frameCount % 4 === 0) {
+    dustParticles.push({
+      x: jeep.x + 10 + Math.random() * 10,
+      y: jeep.y + jeep.h,
+      vx: -1 - Math.random() * 2,
+      vy: -Math.random() * 2,
+      size: 3 + Math.random() * 3,
+      alpha: 0.6,
+      r: 120, g: 90, b: 30,
+    });
+  }
+
+  // Regular dust
+  if (jeep.grounded && frameCount % 5 === 0 && !jeep.inWater && !jeep.onMud) {
+    dustParticles.push({
+      x: jeep.x + 5,
+      y: jeep.y + jeep.h,
+      vx: -1 - Math.random(),
+      vy: -Math.random(),
+      size: 2 + Math.random() * 2,
+      alpha: 0.4,
+      r: 150, g: 140, b: 120,
+    });
+  }
+
+  // Invincibility timer
+  if (jeep.invincible > 0) jeep.invincible--;
+
+  // Reset surface states
+  jeep.inWater = false;
+  jeep.onMud = false;
+  jeep.onIce = false;
+}
+
+function updateObstacles() {
+  // Spawn obstacles
+  const minGap = Math.max(180, 350 - level * 20);
+  const maxGap = Math.max(250, 500 - level * 25);
+  if (obstacles.length === 0 || obstacles[obstacles.length - 1].x < 900 - minGap - Math.random() * (maxGap - minGap)) {
+    spawnObstacle();
+  }
+
+  obstacles.forEach(obs => {
+    obs.x -= speed;
+  });
+
+  // Remove off-screen
+  obstacles = obstacles.filter(o => o.x + o.w > -50);
+}
+
+function checkCollisions() {
+  const jx = jeep.x + 10;
+  const jy = jeep.y + 5;
+  const jw = jeep.w - 20;
+  const jh = jeep.h - 10;
+
+  obstacles.forEach(obs => {
+    // Check overlap
+    const overlapX = jx < obs.x + obs.w && jx + jw > obs.x;
+    const overlapY = jy < obs.y + obs.h && jy + jh > obs.y;
+
+    if (obs.fullWidth && overlapX) {
+      switch (obs.type) {
+        case 'WATER':
+          jeep.inWater = true;
+          break;
+        case 'MUD':
+          jeep.onMud = true;
+          speed = Math.max(baseSpeed * 0.6, speed - 0.03);
+          break;
+        case 'ICE':
+          jeep.onIce = true;
+          break;
+        case 'GAP':
+          if (jeep.grounded && overlapY) {
+            // Falling into gap
+            hit(true);
+          }
+          break;
+      }
+    } else if (!obs.fullWidth && overlapX && overlapY) {
+      if (obs.isRamp && jeep.grounded) {
+        jeep.vy = -12;
+        jeep.grounded = false;
+        jeep.tilt = -0.2;
+        obs.passed = true;
+      } else if (!obs.passed && !obs.isRamp) {
+        // Skip collision if jumping over
+        if (!jeep.grounded && jeep.y + jeep.h < obs.y + obs.h * 0.5) {
+          obs.passed = true;
+          return;
+        }
+        hit(false);
+        obs.passed = true;
+      }
+    }
+  });
+}
+
+function hit(deadly) {
+  if (jeep.invincible > 0) return;
+
+  if (deadly) {
+    jeep.hp = 0;
+  } else {
+    jeep.hp--;
+  }
+
+  jeep.invincible = 60;
+  shakeTimer = 15;
+  shakeIntensity = deadly ? 8 : 4;
+
+  // Hit particles
+  for (let i = 0; i < 10; i++) {
+    particles.push({
+      x: jeep.x + jeep.w / 2,
+      y: jeep.y + jeep.h / 2,
+      vx: (Math.random() - 0.5) * 6,
+      vy: (Math.random() - 0.5) * 6,
+      size: 2 + Math.random() * 4,
+      alpha: 1,
+      g: Math.floor(Math.random() * 200),
+    });
+  }
+
+  if (jeep.hp <= 0) gameOver();
+}
+
+function updateParticles() {
+  dustParticles.forEach(p => {
+    p.x += p.vx - speed * 0.5;
+    p.y += p.vy;
+    p.alpha -= 0.015;
+    p.size *= 1.01;
+  });
+  dustParticles = dustParticles.filter(p => p.alpha > 0);
+
+  splashParticles.forEach(p => {
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.2;
+    p.alpha -= 0.02;
+  });
+  splashParticles = splashParticles.filter(p => p.alpha > 0);
+
+  particles.forEach(p => {
+    p.x += p.vx;
+    p.y += p.vy;
+    p.alpha -= 0.025;
+  });
+  particles = particles.filter(p => p.alpha > 0);
+}
+
+function updateDifficulty() {
+  score = Math.floor(frameCount * speed * 0.15);
+  const newLevel = Math.floor(score / 500) + 1;
+  if (newLevel > level && newLevel <= 10) {
+    level = newLevel;
+    baseSpeed = 3 + (level - 1) * 0.5;
+    if (jeep.hp < jeep.maxHp) jeep.hp++; // Heal on level up
+  }
+
+  hudScore.textContent = `Vzdálenost: ${score} m`;
+  hudSpeed.textContent = `Rychlost: ${Math.floor(60 + (speed - 3) * 15)} km/h`;
+  hudLevel.textContent = `Úroveň: ${level}`;
+}
+
+// Main loop
+function update() {
+  if (state !== STATE.PLAYING) return;
+  frameCount++;
+  updateParallax();
+  updateJeep();
+  updateObstacles();
+  checkCollisions();
+  updateParticles();
+  updateDifficulty();
+}
+
+function draw() {
+  ctx.save();
+
+  // Screen shake
+  if (shakeTimer > 0) {
+    const sx = (Math.random() - 0.5) * shakeIntensity;
+    const sy = (Math.random() - 0.5) * shakeIntensity;
+    ctx.translate(sx, sy);
+    shakeTimer--;
+    shakeIntensity *= 0.9;
+  }
+
+  drawSky();
+  drawClouds();
+  drawMountains();
+  drawTrees();
+  drawRoad();
+
+  // Draw obstacles behind jeep
+  obstacles.forEach(obs => drawObstacle(obs));
+
+  if (state === STATE.PLAYING) {
+    drawJeep();
+    drawParticles();
+    drawHP();
+
+    // Surface indicator
+    if (jeep.inWater) drawWarning('🌊 BRODĚNÍ');
+    else if (jeep.onMud) drawWarning('💩 BLÁTO');
+    else if (jeep.onIce) drawWarning('🧊 LED');
+  }
+
+  ctx.restore();
+}
+
+function gameLoop() {
+  update();
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+initMountains();
+gameLoop();
+</script>
+</body>
+</html>
