@@ -74,7 +74,7 @@ canvas {
 </head>
 <body>
 
-<canvas id="game" width="900" height="500"></canvas>
+<canvas id="game" width="900" height="550"></canvas>
 
 <div id="hud" class="hidden">
   <span id="hud-lives"></span>
@@ -308,9 +308,9 @@ const jeep = {
 };
 
 // Road & terrain
-const ROAD_Y = 340;
-const ROAD_H = 100;
-const LANE_H = ROAD_H / 3;
+const ROAD_Y = 330;
+const ROAD_H = 162;
+const LANE_H = ROAD_H / 3; // 54px per lane — fits the 45px jeep
 const LANE_COLORS = [
   'rgba(85, 85, 85, 1)',     // lane 0 - slightly lighter
   'rgba(75, 75, 75, 1)',     // lane 1 - medium
@@ -348,7 +348,7 @@ const OBSTACLE_TYPES = {
   LOG: { name: 'Kláda', color: '#8B4513', minLevel: 1, lanes: [0,1,2], w: 60, h: 20 },
   WATER: { name: 'Brod', color: '#3498db', minLevel: 2, lanes: [0,1,2], w: 120, h: ROAD_H, fullWidth: true },
   MUD: { name: 'Bláto', color: '#8B6914', minLevel: 2, lanes: [0,1,2], w: 100, h: ROAD_H, fullWidth: true },
-  GAP: { name: 'Propast', color: '#1a1a2e', minLevel: 3, lanes: [0,1,2], w: 80, h: ROAD_H, fullWidth: true, deadly: true },
+  GAP: { name: 'Propast', color: '#1a1a2e', minLevel: 3, lanes: [0,1,2], w: 55, h: ROAD_H, fullWidth: true, deadly: true },
   ICE: { name: 'Led', color: '#a8d8ea', minLevel: 3, lanes: [0,1,2], w: 110, h: ROAD_H, fullWidth: true },
   BOULDER: { name: 'Balvan', color: '#555', minLevel: 4, lanes: [0,1,2], w: 45, h: 40 },
   FALLEN_TREE: { name: 'Padlý strom', color: '#5D4037', minLevel: 4, lanes: [0,1], w: 80, h: 55, tall: true },
@@ -546,11 +546,11 @@ function drawRoad() {
   ctx.setLineDash([]);
 
   // Below road
-  const belowGrad = ctx.createLinearGradient(0, ROAD_Y + ROAD_H, 0, 500);
+  const belowGrad = ctx.createLinearGradient(0, ROAD_Y + ROAD_H, 0, 550);
   belowGrad.addColorStop(0, '#4A3728');
   belowGrad.addColorStop(1, '#2D1F14');
   ctx.fillStyle = belowGrad;
-  ctx.fillRect(0, ROAD_Y + ROAD_H, 900, 60);
+  ctx.fillRect(0, ROAD_Y + ROAD_H, 900, 550 - ROAD_Y - ROAD_H);
 }
 
 function drawObstacle(obs) {
@@ -895,7 +895,7 @@ function drawLives() {
   // Also draw on canvas for visibility
   ctx.font = '24px sans-serif';
   for (let i = 0; i < jeep.maxLives; i++) {
-    ctx.fillText(i < jeep.lives ? '❤️' : '🖤', 20 + i * 30, 485);
+    ctx.fillText(i < jeep.lives ? '❤️' : '🖤', 20 + i * 30, 535);
   }
 }
 
