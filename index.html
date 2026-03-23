@@ -77,6 +77,7 @@ canvas {
 <canvas id="game" width="900" height="500"></canvas>
 
 <div id="hud" class="hidden">
+  <span id="hud-lives"></span>
   <span id="hud-score">Vzdálenost: 0 m</span>
   <span id="hud-speed">Rychlost: 60 km/h</span>
   <span id="hud-level">Úroveň: 1</span>
@@ -94,11 +95,176 @@ const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 const overlay = document.getElementById('ui-overlay');
 const hud = document.getElementById('hud');
+const hudLives = document.getElementById('hud-lives');
 const hudScore = document.getElementById('hud-score');
 const hudSpeed = document.getElementById('hud-speed');
 const hudLevel = document.getElementById('hud-level');
 
-// Game state
+// ============ AUDIO SYSTEM ============
+const AudioCtx = window.AudioContext || window.webkitAudioContext;
+let audioCtx = null;
+let audioStarted = false;
+let engineOsc = null;
+let engineGain = null;
+let musicNodes = [];
+let musicPlaying = false;
+
+function initAudio() {
+  if (audioStarted) return;
+  audioCtx = new AudioCtx();
+  audioStarted = true;
+  startEngine();
+  startMusic();
+}
+
+function startEngine() {
+  if (!audioCtx) return;
+  // Engine sound: low frequency oscillator with slight modulation
+  engineOsc = audioCtx.createOscillator();
+  engineGain = audioCtx.createGain();
+  const engineFilter = audioCtx.createBiquadFilter();
+
+  engineOsc.type = 'sawtooth';
+  engineOsc.frequency.value = 80;
+  engineGain.gain.value = 0.06;
+  engineFilter.type = 'lowpass';
+  engineFilter.frequency.value = 300;
+
+  // Add rumble with a second oscillator
+  const rumbleOsc = audioCtx.createOscillator();
+  const rumbleGain = audioCtx.createGain();
+  rumbleOsc.type = 'triangle';
+  rumbleOsc.frequency.value = 40;
+  rumbleGain.gain.value = 0.04;
+
+  engineOsc.connect(engineFilter);
+  engineFilter.connect(engineGain);
+  engineGain.connect(audioCtx.destination);
+
+  rumbleOsc.connect(rumbleGain);
+  rumbleGain.connect(audioCtx.destination);
+
+  engineOsc.start();
+  rumbleOsc.start();
+
+  musicNodes.push(engineOsc, rumbleOsc);
+}
+
+function updateEngineSound() {
+  if (!engineOsc || !audioCtx) return;
+  // Pitch follows speed
+  const pitch = 60 + speed * 15;
+  engineOsc.frequency.setTargetAtTime(pitch, audioCtx.currentTime, 0.1);
+  engineGain.gain.setTargetAtTime(0.03 + speed * 0.008, audioCtx.currentTime, 0.1);
+}
+
+function playHitSound() {
+  if (!audioCtx) return;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'square';
+  osc.frequency.value = 150;
+  gain.gain.value = 0.15;
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
+  osc.frequency.exponentialRampToValueAtTime(50, audioCtx.currentTime + 0.3);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + 0.3);
+}
+
+function playJumpSound() {
+  if (!audioCtx) return;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'sine';
+  osc.frequency.value = 200;
+  osc.frequency.exponentialRampToValueAtTime(600, audioCtx.currentTime + 0.15);
+  gain.gain.value = 0.08;
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.2);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + 0.2);
+}
+
+function playLaneSound() {
+  if (!audioCtx) return;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'sine';
+  osc.frequency.value = 400;
+  gain.gain.value = 0.05;
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.08);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + 0.08);
+}
+
+function playGameOverSound() {
+  if (!audioCtx) return;
+  const notes = [300, 250, 200, 120];
+  notes.forEach((freq, i) => {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'square';
+    osc.frequency.value = freq;
+    gain.gain.value = 0.1;
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.2 + i * 0.15);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(audioCtx.currentTime + i * 0.15);
+    osc.stop(audioCtx.currentTime + 0.3 + i * 0.15);
+  });
+}
+
+// Simple procedural background music
+let musicInterval = null;
+function startMusic() {
+  if (!audioCtx || musicPlaying) return;
+  musicPlaying = true;
+
+  const melodyNotes = [262, 294, 330, 349, 392, 349, 330, 294]; // C D E F G F E D
+  const bassNotes =   [131, 131, 165, 165, 196, 196, 165, 165];
+  let noteIndex = 0;
+
+  function playNote() {
+    if (!audioCtx || state === STATE.GAMEOVER) return;
+    const mel = audioCtx.createOscillator();
+    const melGain = audioCtx.createGain();
+    mel.type = 'triangle';
+    mel.frequency.value = melodyNotes[noteIndex % melodyNotes.length];
+    melGain.gain.value = 0.04;
+    melGain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.25);
+    mel.connect(melGain);
+    melGain.connect(audioCtx.destination);
+    mel.start();
+    mel.stop(audioCtx.currentTime + 0.28);
+
+    const bass = audioCtx.createOscillator();
+    const bassGain = audioCtx.createGain();
+    bass.type = 'sine';
+    bass.frequency.value = bassNotes[noteIndex % bassNotes.length];
+    bassGain.gain.value = 0.05;
+    bassGain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
+    bass.connect(bassGain);
+    bassGain.connect(audioCtx.destination);
+    bass.start();
+    bass.stop(audioCtx.currentTime + 0.32);
+
+    noteIndex++;
+  }
+
+  musicInterval = setInterval(playNote, 320);
+}
+
+function stopMusic() {
+  musicPlaying = false;
+  if (musicInterval) { clearInterval(musicInterval); musicInterval = null; }
+}
+
+// ============ GAME STATE ============
 const STATE = { MENU: 0, PLAYING: 1, GAMEOVER: 2 };
 let state = STATE.MENU;
 let score = 0;
@@ -130,11 +296,12 @@ const jeep = {
   vy: 0, grounded: true,
   groundY: 0,
   lane: 1, // 0=top, 1=mid, 2=bottom
-  hp: 3, maxHp: 3,
+  lives: 3, maxLives: 3,
   invincible: 0,
   inWater: false,
   onMud: false,
   onIce: false,
+  onSlippery: false,
   tilt: 0,
   wheelAngle: 0,
   laneKeyHeld: false,
@@ -144,6 +311,12 @@ const jeep = {
 const ROAD_Y = 340;
 const ROAD_H = 100;
 const LANE_H = ROAD_H / 3;
+const LANE_COLORS = [
+  'rgba(85, 85, 85, 1)',     // lane 0 - slightly lighter
+  'rgba(75, 75, 75, 1)',     // lane 1 - medium
+  'rgba(65, 65, 65, 1)',     // lane 2 - slightly darker
+];
+const LANE_HIGHLIGHT = 'rgba(255, 215, 0, 0.15)'; // gold highlight for active lane
 
 // Mountains (parallax layers)
 let mountains1 = [];
@@ -180,6 +353,8 @@ const OBSTACLE_TYPES = {
   BOULDER: { name: 'Balvan', color: '#555', minLevel: 4, lanes: [0,1,2], w: 45, h: 40 },
   FALLEN_TREE: { name: 'Padlý strom', color: '#5D4037', minLevel: 4, lanes: [0,1], w: 80, h: 55, tall: true },
   RAMP: { name: 'Rampa', color: '#FF8C00', minLevel: 2, lanes: [1], w: 50, h: 25, isRamp: true },
+  MELTED_LOLLY: { name: 'Rozlitá zmrzka', color: '#FF69B4', minLevel: 2, lanes: [0,1,2], w: 50, h: 25, slippery: true },
+  SMOOTHIE: { name: 'Rozlitý smoothie', color: '#9B59B6', minLevel: 3, lanes: [0,1,2], w: 55, h: 22, slippery: true },
 };
 
 function getAvailableTypes() {
@@ -203,11 +378,13 @@ function spawnObstacle() {
     deadly: type.deadly || false,
     isRamp: type.isRamp || false,
     tall: type.tall || false,
+    slippery: type.slippery || false,
     passed: false,
   });
 }
 
 function startGame() {
+  initAudio();
   state = STATE.PLAYING;
   score = 0;
   speed = 3;
@@ -223,11 +400,12 @@ function startGame() {
   jeep.lane = 1;
   jeep.vy = 0;
   jeep.grounded = true;
-  jeep.hp = 3;
+  jeep.lives = 3;
   jeep.invincible = 0;
   jeep.inWater = false;
   jeep.onMud = false;
   jeep.onIce = false;
+  jeep.onSlippery = false;
   jeep.tilt = 0;
   jeep.laneKeyHeld = false;
   jeep.groundY = jeep.y;
@@ -235,6 +413,7 @@ function startGame() {
   initMountains();
   overlay.classList.add('hidden');
   hud.classList.remove('hidden');
+  startMusic();
 }
 
 function gameOver() {
@@ -247,6 +426,8 @@ function gameOver() {
     <p>Úroveň: ${level} | Rychlost: ${Math.floor(60 + (speed - 3) * 15)} km/h</p>
     <p class="start-hint">Stiskni ENTER pro novou hru</p>
   `;
+  playGameOverSound();
+  stopMusic();
 }
 
 // Drawing functions
@@ -324,19 +505,38 @@ function drawTrees() {
 }
 
 function drawRoad() {
-  // Road base
-  ctx.fillStyle = '#555';
-  ctx.fillRect(0, ROAD_Y, 900, ROAD_H);
+  // Draw each lane with distinct color
+  for (let i = 0; i < 3; i++) {
+    const laneY = ROAD_Y + i * LANE_H;
+    ctx.fillStyle = LANE_COLORS[i];
+    ctx.fillRect(0, laneY, 900, LANE_H);
+
+    // Highlight active lane
+    if (i === jeep.lane && state === STATE.PLAYING) {
+      ctx.fillStyle = LANE_HIGHLIGHT;
+      ctx.fillRect(0, laneY, 900, LANE_H);
+
+      // Left-side lane indicator arrow
+      ctx.fillStyle = 'rgba(255, 215, 0, 0.35)';
+      const arrowX = 10;
+      const arrowCenterY = laneY + LANE_H / 2;
+      ctx.beginPath();
+      ctx.moveTo(arrowX + 15, arrowCenterY - 8);
+      ctx.lineTo(arrowX + 25, arrowCenterY);
+      ctx.lineTo(arrowX + 15, arrowCenterY + 8);
+      ctx.fill();
+    }
+  }
 
   // Road edges
-  ctx.fillStyle = '#444';
+  ctx.fillStyle = '#FFA500';
   ctx.fillRect(0, ROAD_Y, 900, 3);
   ctx.fillRect(0, ROAD_Y + ROAD_H - 3, 900, 3);
 
-  // Lane markings
-  ctx.setLineDash([20, 15]);
-  ctx.strokeStyle = '#888';
+  // Lane dividers - solid white lines
+  ctx.strokeStyle = 'rgba(255,255,255,0.4)';
   ctx.lineWidth = 2;
+  ctx.setLineDash([20, 15]);
   for (let i = 1; i < 3; i++) {
     ctx.beginPath();
     ctx.moveTo(0, ROAD_Y + i * LANE_H);
@@ -486,6 +686,77 @@ function drawObstacle(obs) {
         ctx.fillRect(sx, obs.y + obs.h - 8, 8, 3);
       }
       break;
+
+    case 'MELTED_LOLLY':
+      // Melted ice lolly puddle - pink/red sticky mess
+      // Main puddle
+      ctx.fillStyle = 'rgba(255, 105, 180, 0.6)';
+      ctx.beginPath();
+      ctx.ellipse(obs.x + obs.w/2, obs.y + obs.h/2, obs.w/2, obs.h/2.5, 0.1, 0, Math.PI*2);
+      ctx.fill();
+      // Darker center
+      ctx.fillStyle = 'rgba(220, 60, 120, 0.5)';
+      ctx.beginPath();
+      ctx.ellipse(obs.x + obs.w/2 - 5, obs.y + obs.h/2, obs.w/4, obs.h/3.5, -0.2, 0, Math.PI*2);
+      ctx.fill();
+      // Popsicle stick
+      ctx.fillStyle = '#D2B48C';
+      ctx.save();
+      ctx.translate(obs.x + obs.w/2 + 8, obs.y + obs.h/2 - 2);
+      ctx.rotate(0.4);
+      ctx.fillRect(-2, -12, 4, 18);
+      ctx.restore();
+      // Shine spots (sticky)
+      ctx.fillStyle = 'rgba(255,255,255,0.4)';
+      ctx.beginPath();
+      ctx.arc(obs.x + obs.w/2 - 8, obs.y + obs.h/2 - 3, 3, 0, Math.PI*2);
+      ctx.fill();
+      // Drip trails
+      ctx.fillStyle = 'rgba(255, 105, 180, 0.3)';
+      ctx.beginPath();
+      ctx.ellipse(obs.x + obs.w/2 + 15, obs.y + obs.h/2 + 5, 6, 3, 0.5, 0, Math.PI*2);
+      ctx.fill();
+      break;
+
+    case 'SMOOTHIE':
+      // Spilled smoothie - purple/green splat
+      // Main spill
+      ctx.fillStyle = 'rgba(155, 89, 182, 0.55)';
+      ctx.beginPath();
+      ctx.ellipse(obs.x + obs.w/2, obs.y + obs.h/2, obs.w/2, obs.h/2.2, -0.15, 0, Math.PI*2);
+      ctx.fill();
+      // Berry chunks
+      ctx.fillStyle = 'rgba(120, 40, 140, 0.5)';
+      for (let i = 0; i < 4; i++) {
+        ctx.beginPath();
+        ctx.arc(obs.x + 10 + i * 12, obs.y + obs.h/2 + (i%2 ? 3 : -3), 3, 0, Math.PI*2);
+        ctx.fill();
+      }
+      // Green kiwi bits
+      ctx.fillStyle = 'rgba(100, 180, 60, 0.5)';
+      ctx.beginPath();
+      ctx.arc(obs.x + obs.w/2 + 5, obs.y + obs.h/2 - 2, 4, 0, Math.PI*2);
+      ctx.fill();
+      // Toppled cup
+      ctx.fillStyle = 'rgba(200, 200, 200, 0.7)';
+      ctx.save();
+      ctx.translate(obs.x + obs.w/2 - 10, obs.y + obs.h/2);
+      ctx.rotate(-1.2);
+      ctx.fillRect(-5, -10, 10, 16);
+      ctx.restore();
+      // Straw
+      ctx.strokeStyle = '#E74C3C';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(obs.x + obs.w/2 - 12, obs.y + obs.h/2 - 8);
+      ctx.lineTo(obs.x + obs.w/2 - 18, obs.y + obs.h/2 - 18);
+      ctx.stroke();
+      // Shine
+      ctx.fillStyle = 'rgba(255,255,255,0.3)';
+      ctx.beginPath();
+      ctx.ellipse(obs.x + obs.w/2 + 8, obs.y + obs.h/2 - 4, 5, 2, 0, 0, Math.PI*2);
+      ctx.fill();
+      break;
   }
   ctx.restore();
 }
@@ -506,6 +777,7 @@ function drawJeep() {
 
   // Shadow
   ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.beginPath();
   ctx.ellipse(jeep.w/2, jeep.h + 5, jeep.w/2 - 5, 6, 0, 0, Math.PI*2);
   ctx.fill();
 
@@ -612,11 +884,18 @@ function drawParticles() {
   });
 }
 
-function drawHP() {
-  for (let i = 0; i < jeep.maxHp; i++) {
-    ctx.fillStyle = i < jeep.hp ? '#e74c3c' : '#444';
-    ctx.font = '22px sans-serif';
-    ctx.fillText('❤️', 20 + i * 28, 485);
+function drawLives() {
+  // Draw hearts in HUD
+  let livesStr = '';
+  for (let i = 0; i < jeep.maxLives; i++) {
+    livesStr += i < jeep.lives ? '❤️' : '🖤';
+  }
+  hudLives.textContent = livesStr;
+
+  // Also draw on canvas for visibility
+  ctx.font = '24px sans-serif';
+  for (let i = 0; i < jeep.maxLives; i++) {
+    ctx.fillText(i < jeep.lives ? '❤️' : '🖤', 20 + i * 30, 485);
   }
 }
 
@@ -653,14 +932,14 @@ function updateParallax() {
 function updateJeep() {
   // Lane movement
   const targetY = ROAD_Y + jeep.lane * LANE_H + (LANE_H - jeep.h) / 2;
+  const isSlippery = jeep.onIce || jeep.onMud || jeep.onSlippery;
 
   // ArrowLeft/Right = switch lanes
   if (keys['ArrowLeft'] && jeep.grounded && !jeep.laneKeyHeld) {
-    if (jeep.onIce || jeep.onMud) {
-      // Slippery: random chance to overshoot or undershoot
+    if (isSlippery) {
       const slip = Math.random();
       if (slip < 0.3 && jeep.lane > 1) {
-        jeep.lane -= 2; // overshoot
+        jeep.lane -= 2;
       } else if (slip < 0.5) {
         // no movement - slip!
       } else if (jeep.lane > 0) {
@@ -670,12 +949,13 @@ function updateJeep() {
       jeep.lane--;
     }
     jeep.laneKeyHeld = true;
+    playLaneSound();
   }
   if (keys['ArrowRight'] && jeep.grounded && !jeep.laneKeyHeld) {
-    if (jeep.onIce || jeep.onMud) {
+    if (isSlippery) {
       const slip = Math.random();
       if (slip < 0.3 && jeep.lane < 1) {
-        jeep.lane += 2; // overshoot
+        jeep.lane += 2;
       } else if (slip < 0.5) {
         // no movement - slip!
       } else if (jeep.lane < 2) {
@@ -685,6 +965,7 @@ function updateJeep() {
       jeep.lane++;
     }
     jeep.laneKeyHeld = true;
+    playLaneSound();
   }
   if (!keys['ArrowLeft'] && !keys['ArrowRight']) {
     jeep.laneKeyHeld = false;
@@ -695,7 +976,8 @@ function updateJeep() {
     jeep.vy = -10;
     jeep.grounded = false;
     jeep.tilt = -0.15;
-    keys['ArrowUp'] = false; // prevent holding
+    keys['ArrowUp'] = false;
+    playJumpSound();
   }
 
   // Space also jumps
@@ -704,13 +986,13 @@ function updateJeep() {
     jeep.grounded = false;
     jeep.tilt = -0.15;
     keys[' '] = false;
+    playJumpSound();
   }
 
   // ArrowDown = brake
   if (keys['ArrowDown']) {
     speed = Math.max(baseSpeed * 0.4, speed - 0.12);
   } else {
-    // Speed recovery
     speed += (baseSpeed - speed) * 0.02;
   }
 
@@ -738,8 +1020,7 @@ function updateJeep() {
       }
     }
   } else {
-    // Smooth lane transition — slippery surfaces slide slower/faster
-    const laneSpeed = jeep.onIce ? 0.06 : (jeep.onMud ? 0.08 : 0.15);
+    const laneSpeed = jeep.onIce ? 0.06 : ((jeep.onMud || jeep.onSlippery) ? 0.08 : 0.15);
     const diff = targetY - jeep.y;
     jeep.y += diff * laneSpeed;
     jeep.groundY = jeep.y;
@@ -754,12 +1035,16 @@ function updateJeep() {
       const drift = Math.random() < 0.5 ? -1 : 1;
       jeep.lane = Math.max(0, Math.min(2, jeep.lane + drift));
     }
+    // Slippery obstacles: occasional drift
+    if (jeep.onSlippery && frameCount % 25 === 0 && Math.random() < 0.35) {
+      const drift = Math.random() < 0.5 ? -1 : 1;
+      jeep.lane = Math.max(0, Math.min(2, jeep.lane + drift));
+    }
   }
 
   // Water slowdown
   if (jeep.inWater) {
     speed = Math.max(baseSpeed * 0.4, speed - 0.05);
-    // Water splash
     if (frameCount % 3 === 0) {
       splashParticles.push({
         x: jeep.x + 60 + Math.random() * 10,
@@ -775,7 +1060,6 @@ function updateJeep() {
   // Mud slowdown + heavy splashing
   if (jeep.onMud) {
     speed = Math.max(baseSpeed * 0.5, speed - 0.04);
-    // Constant mud spray from wheels
     for (let i = 0; i < 3; i++) {
       dustParticles.push({
         x: jeep.x + 10 + Math.random() * 15,
@@ -789,7 +1073,6 @@ function updateJeep() {
         b: 10 + Math.floor(Math.random() * 20),
       });
     }
-    // Big splashes from front wheel
     if (frameCount % 2 === 0) {
       for (let i = 0; i < 2; i++) {
         dustParticles.push({
@@ -805,7 +1088,6 @@ function updateJeep() {
         });
       }
     }
-    // Side splatter
     if (frameCount % 3 === 0) {
       dustParticles.push({
         x: jeep.x + 20 + Math.random() * 30,
@@ -822,9 +1104,8 @@ function updateJeep() {
   // Ice: speed stays but no braking effectiveness + snow particles
   if (jeep.onIce) {
     if (keys['ArrowDown']) {
-      speed = Math.max(baseSpeed * 0.8, speed); // brakes barely work on ice
+      speed = Math.max(baseSpeed * 0.8, speed);
     }
-    // Snowflakes kicked up from wheels
     for (let i = 0; i < 2; i++) {
       dustParticles.push({
         x: jeep.x + 5 + Math.random() * 15,
@@ -838,7 +1119,6 @@ function updateJeep() {
         b: 245 + Math.floor(Math.random() * 10),
       });
     }
-    // Falling snow across the screen
     if (frameCount % 2 === 0) {
       for (let i = 0; i < 3; i++) {
         dustParticles.push({
@@ -854,6 +1134,21 @@ function updateJeep() {
         });
       }
     }
+  }
+
+  // Slippery surface particles (pink/purple splats)
+  if (jeep.onSlippery && frameCount % 4 === 0) {
+    dustParticles.push({
+      x: jeep.x + 10 + Math.random() * 15,
+      y: jeep.y + jeep.h - 2,
+      vx: -1 - Math.random() * 2,
+      vy: -1 - Math.random() * 2,
+      size: 2 + Math.random() * 3,
+      alpha: 0.5,
+      r: 200 + Math.floor(Math.random() * 55),
+      g: 80 + Math.floor(Math.random() * 60),
+      b: 150 + Math.floor(Math.random() * 60),
+    });
   }
 
   // Regular dust
@@ -876,10 +1171,13 @@ function updateJeep() {
   jeep.inWater = false;
   jeep.onMud = false;
   jeep.onIce = false;
+  jeep.onSlippery = false;
+
+  // Update engine sound
+  updateEngineSound();
 }
 
 function updateObstacles() {
-  // Spawn obstacles
   const minGap = Math.max(180, 350 - level * 20);
   const maxGap = Math.max(250, 500 - level * 25);
   if (obstacles.length === 0 || obstacles[obstacles.length - 1].x < 900 - minGap - Math.random() * (maxGap - minGap)) {
@@ -890,7 +1188,6 @@ function updateObstacles() {
     obs.x -= speed;
   });
 
-  // Remove off-screen
   obstacles = obstacles.filter(o => o.x + o.w > -50);
 }
 
@@ -901,7 +1198,6 @@ function checkCollisions() {
   const jh = jeep.h - 10;
 
   obstacles.forEach(obs => {
-    // Check overlap
     const overlapX = jx < obs.x + obs.w && jx + jw > obs.x;
     const overlapY = jy < obs.y + obs.h && jy + jh > obs.y;
 
@@ -919,19 +1215,24 @@ function checkCollisions() {
           break;
         case 'GAP':
           if (jeep.grounded && overlapY) {
-            // Falling into gap
             hit(true);
           }
           break;
       }
-    } else if (!obs.fullWidth && overlapX && overlapY) {
+    } else if (obs.slippery && overlapX && overlapY) {
+      // Slippery obstacles: apply effect but don't damage
+      if (!obs.passed) {
+        jeep.onSlippery = true;
+        obs.passed = true;
+      }
+      jeep.onSlippery = true;
+    } else if (!obs.fullWidth && !obs.slippery && overlapX && overlapY) {
       if (obs.isRamp && jeep.grounded) {
         jeep.vy = -12;
         jeep.grounded = false;
         jeep.tilt = -0.2;
         obs.passed = true;
       } else if (!obs.passed && !obs.isRamp) {
-        // Skip collision if jumping over
         if (!jeep.grounded && jeep.y + jeep.h < obs.y + obs.h * 0.5) {
           obs.passed = true;
           return;
@@ -947,14 +1248,16 @@ function hit(deadly) {
   if (jeep.invincible > 0) return;
 
   if (deadly) {
-    jeep.hp = 0;
+    jeep.lives = 0;
   } else {
-    jeep.hp--;
+    jeep.lives--;
   }
 
   jeep.invincible = 60;
   shakeTimer = 15;
   shakeIntensity = deadly ? 8 : 4;
+
+  playHitSound();
 
   // Hit particles
   for (let i = 0; i < 10; i++) {
@@ -969,7 +1272,7 @@ function hit(deadly) {
     });
   }
 
-  if (jeep.hp <= 0) gameOver();
+  if (jeep.lives <= 0) gameOver();
 }
 
 function updateParticles() {
@@ -1003,9 +1306,7 @@ function updateDifficulty() {
   if (newLevel > level && newLevel <= 15) {
     level = newLevel;
     baseSpeed = 3 + (level - 1) * 0.7;
-    if (jeep.hp < jeep.maxHp) jeep.hp++; // Heal on level up
   }
-  // Continuous subtle speed increase between levels
   baseSpeed += 0.0005;
 
   hudScore.textContent = `Vzdálenost: ${score} m`;
@@ -1049,12 +1350,13 @@ function draw() {
   if (state === STATE.PLAYING) {
     drawJeep();
     drawParticles();
-    drawHP();
+    drawLives();
 
     // Surface indicator
     if (jeep.inWater) drawWarning('🌊 BRODĚNÍ');
     else if (jeep.onMud) drawWarning('💩 BLÁTO');
     else if (jeep.onIce) drawWarning('🧊 LED');
+    else if (jeep.onSlippery) drawWarning('🍦 KLUZKO!');
   }
 
   ctx.restore();
