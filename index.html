@@ -119,40 +119,31 @@ function initAudio() {
 
 function startEngine() {
   if (!audioCtx) return;
-  // Engine sound: low frequency oscillator with slight modulation
   engineOsc = audioCtx.createOscillator();
   engineGain = audioCtx.createGain();
   const engineFilter = audioCtx.createBiquadFilter();
-
   engineOsc.type = 'sawtooth';
   engineOsc.frequency.value = 80;
   engineGain.gain.value = 0.06;
   engineFilter.type = 'lowpass';
   engineFilter.frequency.value = 300;
-
-  // Add rumble with a second oscillator
   const rumbleOsc = audioCtx.createOscillator();
   const rumbleGain = audioCtx.createGain();
   rumbleOsc.type = 'triangle';
   rumbleOsc.frequency.value = 40;
   rumbleGain.gain.value = 0.04;
-
   engineOsc.connect(engineFilter);
   engineFilter.connect(engineGain);
   engineGain.connect(audioCtx.destination);
-
   rumbleOsc.connect(rumbleGain);
   rumbleGain.connect(audioCtx.destination);
-
   engineOsc.start();
   rumbleOsc.start();
-
   musicNodes.push(engineOsc, rumbleOsc);
 }
 
 function updateEngineSound() {
   if (!engineOsc || !audioCtx) return;
-  // Pitch follows speed
   const pitch = 60 + speed * 15;
   engineOsc.frequency.setTargetAtTime(pitch, audioCtx.currentTime, 0.1);
   engineGain.gain.setTargetAtTime(0.03 + speed * 0.008, audioCtx.currentTime, 0.1);
@@ -170,10 +161,7 @@ function stopEngine() {
 
 function playCrashSound() {
   if (!audioCtx) return;
-  // Metal crunch — noise burst + low thud
   const t = audioCtx.currentTime;
-
-  // Noise burst (crash texture)
   const bufferSize = audioCtx.sampleRate * 0.25;
   const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
   const data = noiseBuffer.getChannelData(0);
@@ -194,8 +182,6 @@ function playCrashSound() {
   noiseGain.connect(audioCtx.destination);
   noise.start(t);
   noise.stop(t + 0.25);
-
-  // Low impact thud
   const thud = audioCtx.createOscillator();
   const thudGain = audioCtx.createGain();
   thud.type = 'sine';
@@ -207,8 +193,6 @@ function playCrashSound() {
   thudGain.connect(audioCtx.destination);
   thud.start(t);
   thud.stop(t + 0.2);
-
-  // Metal clang
   const clang = audioCtx.createOscillator();
   const clangGain = audioCtx.createGain();
   clang.type = 'square';
@@ -292,16 +276,13 @@ function playGameOverSound() {
   });
 }
 
-// Simple procedural background music
 let musicInterval = null;
 function startMusic() {
   if (!audioCtx || musicPlaying) return;
   musicPlaying = true;
-
-  const melodyNotes = [262, 294, 330, 349, 392, 349, 330, 294]; // C D E F G F E D
+  const melodyNotes = [262, 294, 330, 349, 392, 349, 330, 294];
   const bassNotes =   [131, 131, 165, 165, 196, 196, 165, 165];
   let noteIndex = 0;
-
   function playNote() {
     if (!audioCtx || state === STATE.GAMEOVER) return;
     const mel = audioCtx.createOscillator();
@@ -314,7 +295,6 @@ function startMusic() {
     melGain.connect(audioCtx.destination);
     mel.start();
     mel.stop(audioCtx.currentTime + 0.28);
-
     const bass = audioCtx.createOscillator();
     const bassGain = audioCtx.createGain();
     bass.type = 'sine';
@@ -325,10 +305,8 @@ function startMusic() {
     bassGain.connect(audioCtx.destination);
     bass.start();
     bass.stop(audioCtx.currentTime + 0.32);
-
     noteIndex++;
   }
-
   musicInterval = setInterval(playNote, 320);
 }
 
@@ -351,6 +329,7 @@ let shakeIntensity = 0;
 let particles = [];
 let dustParticles = [];
 let splashParticles = [];
+let currentTheme = 'mountain';
 
 // Keys
 const keys = {};
@@ -363,12 +342,80 @@ window.addEventListener('keydown', e => {
 });
 window.addEventListener('keyup', e => keys[e.key] = false);
 
+// ============ THEME SYSTEM ============
+function getTheme() {
+  if (level <= 5) return 'mountain';
+  if (level <= 10) return 'city';
+  if (level <= 15) return 'desert';
+  if (level <= 20) return 'ocean';
+  if (level <= 25) return 'swamp';
+  return 'racetrack';
+}
+
+const THEMES = {
+  mountain: {
+    sky: ['#87CEEB', '#B0E0E6', '#E0F0E0'],
+    farMountain: '#7B9EA8',
+    nearMountain: '#5A7A5A',
+    snowCap: '#E8E8E8',
+    roadEdge: '#FFA500',
+    belowRoad: ['#4A3728', '#2D1F14'],
+    laneColors: ['rgba(85,85,85,1)', 'rgba(75,75,75,1)', 'rgba(65,65,65,1)'],
+    cloudColor: 'rgba(255,255,255,0.8)',
+  },
+  city: {
+    sky: ['#6B7B8D', '#8899AA', '#C0C8D0'],
+    farMountain: '#4A4A5A',
+    nearMountain: '#3A3A4A',
+    roadEdge: '#FFD700',
+    belowRoad: ['#555555', '#333333'],
+    laneColors: ['rgba(70,70,70,1)', 'rgba(60,60,60,1)', 'rgba(50,50,50,1)'],
+    cloudColor: 'rgba(200,200,210,0.6)',
+  },
+  desert: {
+    sky: ['#FF9933', '#FFB366', '#FFDD99'],
+    farMountain: '#C2956B',
+    nearMountain: '#A87D50',
+    roadEdge: '#CC8833',
+    belowRoad: ['#D4A45A', '#B8883A'],
+    laneColors: ['rgba(160,130,80,1)', 'rgba(145,115,70,1)', 'rgba(130,100,60,1)'],
+    cloudColor: 'rgba(255,255,240,0.4)',
+  },
+  ocean: {
+    sky: ['#1a5276', '#2980b9', '#5dade2'],
+    farMountain: '#1a6e8e',
+    nearMountain: '#1a8eae',
+    roadEdge: '#FFFFFF',
+    belowRoad: ['#0a3d5c', '#06263a'],
+    laneColors: ['rgba(30,90,140,1)', 'rgba(25,80,130,1)', 'rgba(20,70,120,1)'],
+    cloudColor: 'rgba(255,255,255,0.7)',
+  },
+  swamp: {
+    sky: ['#2d4a1e', '#3d5a2e', '#5a7a3e'],
+    farMountain: '#3a4a2a',
+    nearMountain: '#2a3a1a',
+    roadEdge: '#5a6a3a',
+    belowRoad: ['#2a3a1a', '#1a2a0a'],
+    laneColors: ['rgba(60,75,40,1)', 'rgba(50,65,35,1)', 'rgba(45,55,30,1)'],
+    cloudColor: 'rgba(150,170,130,0.4)',
+  },
+  racetrack: {
+    sky: ['#4a90d9', '#6ab0f0', '#c0e0ff'],
+    farMountain: '#889988',
+    nearMountain: '#778877',
+    roadEdge: '#FF0000',
+    belowRoad: ['#228B22', '#1a6e1a'],
+    laneColors: ['rgba(55,55,55,1)', 'rgba(50,50,50,1)', 'rgba(45,45,45,1)'],
+    cloudColor: 'rgba(255,255,255,0.8)',
+  },
+};
+
 // Jeep
 const jeep = {
   x: 150, y: 0, w: 70, h: 45,
   vy: 0, grounded: true,
   groundY: 0,
-  lane: 1, // 0=top, 1=mid, 2=bottom
+  lane: 1,
   lives: 3, maxLives: 3,
   invincible: 0,
   inWater: false,
@@ -376,7 +423,7 @@ const jeep = {
   onIce: false,
   onSlippery: false,
   turbo: false,
-  turboFuel: 100, // turbo gauge 0-100
+  turboFuel: 100,
   tilt: 0,
   wheelAngle: 0,
   laneKeyHeld: false,
@@ -385,25 +432,22 @@ const jeep = {
 // Road & terrain
 const ROAD_Y = 330;
 const ROAD_H = 198;
-const LANE_H = ROAD_H / 3; // 66px per lane — jeep (45+wheels ~50px) with padding
-const LANE_COLORS = [
-  'rgba(85, 85, 85, 1)',     // lane 0 - slightly lighter
-  'rgba(75, 75, 75, 1)',     // lane 1 - medium
-  'rgba(65, 65, 65, 1)',     // lane 2 - slightly darker
-];
-const LANE_HIGHLIGHT = 'rgba(255, 215, 0, 0.15)'; // gold highlight for active lane
+const LANE_H = ROAD_H / 3;
+const LANE_HIGHLIGHT = 'rgba(255, 215, 0, 0.15)';
 
-// Mountains (parallax layers)
+// Parallax layers
 let mountains1 = [];
 let mountains2 = [];
 let clouds = [];
 let trees = [];
+let bgElements = []; // theme-specific background elements
 
 function initMountains() {
   mountains1 = [];
   mountains2 = [];
   clouds = [];
   trees = [];
+  bgElements = [];
   for (let i = 0; i < 8; i++) {
     mountains1.push({ x: i * 200 - 100, w: 250, h: 100 + Math.random() * 80 });
     mountains2.push({ x: i * 160 - 50, w: 200, h: 60 + Math.random() * 50 });
@@ -413,6 +457,9 @@ function initMountains() {
   }
   for (let i = 0; i < 12; i++) {
     trees.push({ x: Math.random() * 1000, h: 30 + Math.random() * 25, type: Math.floor(Math.random() * 3) });
+  }
+  for (let i = 0; i < 8; i++) {
+    bgElements.push({ x: Math.random() * 1000, h: 20 + Math.random() * 30, type: Math.floor(Math.random() * 3) });
   }
 }
 
@@ -430,14 +477,50 @@ const OBSTACLE_TYPES = {
   RAMP: { name: 'Rampa', color: '#FF8C00', minLevel: 2, lanes: [1], w: 50, h: 25, isRamp: true },
   MELTED_LOLLY: { name: 'Rozlitá zmrzka', color: '#FF69B4', minLevel: 2, lanes: [0,1,2], w: 50, h: 25, slippery: true },
   SMOOTHIE: { name: 'Rozlitý smoothie', color: '#9B59B6', minLevel: 3, lanes: [0,1,2], w: 55, h: 22, slippery: true },
+  // City obstacles
+  POTHOLE: { name: 'Výmol', color: '#333', minLevel: 6, lanes: [0,1,2], w: 40, h: 25 },
+  CONE: { name: 'Kužel', color: '#FF6600', minLevel: 6, lanes: [0,1,2], w: 25, h: 35 },
+  // Desert obstacles
+  CACTUS: { name: 'Kaktus', color: '#2E8B57', minLevel: 11, lanes: [0,1,2], w: 30, h: 45 },
+  TUMBLEWEED: { name: 'Kotrmelec', color: '#C4A35A', minLevel: 11, lanes: [0,1,2], w: 35, h: 30 },
+  // Ocean obstacles (islands with palm trees)
+  ISLAND: { name: 'Ostrov', color: '#D4A45A', minLevel: 16, lanes: [0,1,2], w: 70, h: 50 },
+  // Swamp obstacles (bones)
+  BONE_PILE: { name: 'Kosti', color: '#E8DCC8', minLevel: 21, lanes: [0,1,2], w: 50, h: 30 },
+  SKULL: { name: 'Lebka', color: '#F0E6D3', minLevel: 21, lanes: [0,1,2], w: 35, h: 35 },
+  // Racetrack obstacles
+  TIRE_WALL: { name: 'Pneumatiky', color: '#222', minLevel: 26, lanes: [0,1,2], w: 45, h: 35 },
+  OIL_SPILL: { name: 'Olej', color: '#1a1a1a', minLevel: 26, lanes: [0,1,2], w: 60, h: 20, slippery: true },
 };
 
 function getAvailableTypes() {
-  return Object.entries(OBSTACLE_TYPES).filter(([,v]) => v.minLevel <= level);
+  const theme = currentTheme;
+  return Object.entries(OBSTACLE_TYPES).filter(([key, v]) => {
+    if (v.minLevel > level) return false;
+    // Filter obstacles to match current theme
+    if (theme === 'ocean') {
+      return ['ISLAND', 'WATER', 'RAMP', 'GAP'].includes(key);
+    }
+    if (theme === 'swamp') {
+      return ['BONE_PILE', 'SKULL', 'MUD', 'GAP', 'RAMP', 'LOG'].includes(key);
+    }
+    if (theme === 'racetrack') {
+      return ['TIRE_WALL', 'OIL_SPILL', 'RAMP', 'CONE'].includes(key);
+    }
+    if (theme === 'city') {
+      return ['POTHOLE', 'CONE', 'ROCK', 'RAMP', 'GAP', 'MELTED_LOLLY', 'SMOOTHIE'].includes(key);
+    }
+    if (theme === 'desert') {
+      return ['CACTUS', 'TUMBLEWEED', 'ROCK', 'BOULDER', 'RAMP', 'GAP'].includes(key);
+    }
+    // mountain - original obstacles
+    return v.minLevel <= 5 || ['GAP', 'BOULDER', 'FALLEN_TREE'].includes(key);
+  });
 }
 
 function spawnObstacle() {
   const available = getAvailableTypes();
+  if (available.length === 0) return;
   const [key, type] = available[Math.floor(Math.random() * available.length)];
   const lane = type.fullWidth ? -1 : type.lanes[Math.floor(Math.random() * type.lanes.length)];
   const y = type.fullWidth ? ROAD_Y : ROAD_Y + lane * LANE_H + (LANE_H - type.h) / 2;
@@ -465,6 +548,7 @@ function startGame() {
   speed = 3;
   baseSpeed = 3;
   level = 1;
+  currentTheme = 'mountain';
   frameCount = 0;
   lastObstacleX = 900;
   obstacles = [];
@@ -509,18 +593,21 @@ function gameOver() {
   playGameOverSound();
 }
 
-// Drawing functions
+// ============ DRAWING FUNCTIONS ============
+
 function drawSky() {
+  const theme = THEMES[currentTheme];
   const grad = ctx.createLinearGradient(0, 0, 0, ROAD_Y);
-  grad.addColorStop(0, '#87CEEB');
-  grad.addColorStop(0.6, '#B0E0E6');
-  grad.addColorStop(1, '#E0F0E0');
+  grad.addColorStop(0, theme.sky[0]);
+  grad.addColorStop(0.6, theme.sky[1]);
+  grad.addColorStop(1, theme.sky[2]);
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, 900, ROAD_Y);
 }
 
 function drawClouds() {
-  ctx.fillStyle = 'rgba(255,255,255,0.8)';
+  const theme = THEMES[currentTheme];
+  ctx.fillStyle = theme.cloudColor;
   clouds.forEach(c => {
     ctx.beginPath();
     ctx.ellipse(c.x, c.y, c.w / 2, 15, 0, 0, Math.PI * 2);
@@ -531,8 +618,88 @@ function drawClouds() {
 }
 
 function drawMountains() {
-  // Far mountains
-  ctx.fillStyle = '#7B9EA8';
+  const theme = THEMES[currentTheme];
+
+  if (currentTheme === 'ocean') {
+    // Draw waves instead of mountains
+    ctx.fillStyle = theme.farMountain;
+    for (let x = 0; x < 920; x += 5) {
+      const waveH = 15 + Math.sin((x + frameCount * 1.5) * 0.02) * 10;
+      ctx.fillRect(x, ROAD_Y - waveH, 6, waveH);
+    }
+    ctx.fillStyle = theme.nearMountain;
+    for (let x = 0; x < 920; x += 5) {
+      const waveH = 10 + Math.sin((x + frameCount * 2.5) * 0.03) * 8;
+      ctx.fillRect(x, ROAD_Y - waveH - 5, 6, waveH + 5);
+    }
+    return;
+  }
+
+  if (currentTheme === 'city') {
+    // Draw buildings
+    ctx.fillStyle = theme.farMountain;
+    mountains1.forEach(m => {
+      const bw = m.w * 0.4;
+      const bh = m.h * 1.2;
+      ctx.fillRect(m.x, ROAD_Y - bh, bw, bh);
+      // Windows
+      ctx.fillStyle = '#FFD700';
+      for (let wy = ROAD_Y - bh + 8; wy < ROAD_Y - 10; wy += 16) {
+        for (let wx = m.x + 6; wx < m.x + bw - 6; wx += 14) {
+          if (Math.random() > 0.3) {
+            ctx.fillRect(wx, wy, 6, 8);
+          }
+        }
+      }
+      ctx.fillStyle = theme.farMountain;
+    });
+    ctx.fillStyle = theme.nearMountain;
+    mountains2.forEach(m => {
+      const bw = m.w * 0.5;
+      const bh = m.h * 1.5;
+      ctx.fillRect(m.x, ROAD_Y - bh, bw, bh);
+      ctx.fillStyle = '#AACCFF';
+      for (let wy = ROAD_Y - bh + 6; wy < ROAD_Y - 8; wy += 12) {
+        for (let wx = m.x + 5; wx < m.x + bw - 5; wx += 10) {
+          if (Math.random() > 0.4) {
+            ctx.fillRect(wx, wy, 5, 6);
+          }
+        }
+      }
+      ctx.fillStyle = theme.nearMountain;
+    });
+    return;
+  }
+
+  if (currentTheme === 'racetrack') {
+    // Draw grandstands
+    ctx.fillStyle = '#888899';
+    mountains1.forEach(m => {
+      const sw = m.w * 0.6;
+      const sh = m.h * 0.5;
+      ctx.fillRect(m.x, ROAD_Y - sh, sw, sh);
+      // Rows of seats
+      for (let row = 0; row < 3; row++) {
+        const rowY = ROAD_Y - sh + row * (sh / 3);
+        for (let s = 0; s < 6; s++) {
+          const colors = ['#FF0000', '#0000FF', '#FFFF00', '#00FF00', '#FF8800', '#FF00FF'];
+          ctx.fillStyle = colors[(s + row) % colors.length];
+          ctx.fillRect(m.x + 5 + s * (sw / 6), rowY + 3, sw / 7, sh / 4);
+        }
+      }
+    });
+    // Safety barriers
+    ctx.fillStyle = '#FF0000';
+    ctx.fillRect(0, ROAD_Y - 8, 900, 4);
+    ctx.fillStyle = '#FFFFFF';
+    for (let bx = 0; bx < 900; bx += 30) {
+      ctx.fillRect(bx, ROAD_Y - 8, 15, 4);
+    }
+    return;
+  }
+
+  // Default mountains (mountain, desert, swamp)
+  ctx.fillStyle = theme.farMountain;
   mountains1.forEach(m => {
     ctx.beginPath();
     ctx.moveTo(m.x, ROAD_Y);
@@ -540,19 +707,19 @@ function drawMountains() {
     ctx.lineTo(m.x + m.w, ROAD_Y);
     ctx.fill();
   });
-  // Snow caps
-  ctx.fillStyle = '#E8E8E8';
-  mountains1.forEach(m => {
-    ctx.beginPath();
-    const peakX = m.x + m.w / 2;
-    const peakY = ROAD_Y - m.h;
-    ctx.moveTo(peakX, peakY);
-    ctx.lineTo(peakX - 20, peakY + 20);
-    ctx.lineTo(peakX + 20, peakY + 20);
-    ctx.fill();
-  });
-  // Near mountains
-  ctx.fillStyle = '#5A7A5A';
+  if (currentTheme === 'mountain') {
+    ctx.fillStyle = theme.snowCap;
+    mountains1.forEach(m => {
+      ctx.beginPath();
+      const peakX = m.x + m.w / 2;
+      const peakY = ROAD_Y - m.h;
+      ctx.moveTo(peakX, peakY);
+      ctx.lineTo(peakX - 20, peakY + 20);
+      ctx.lineTo(peakX + 20, peakY + 20);
+      ctx.fill();
+    });
+  }
+  ctx.fillStyle = theme.nearMountain;
   mountains2.forEach(m => {
     ctx.beginPath();
     ctx.moveTo(m.x, ROAD_Y);
@@ -563,12 +730,88 @@ function drawMountains() {
 }
 
 function drawTrees() {
+  if (currentTheme === 'city') {
+    // Street lights
+    trees.forEach(t => {
+      const baseY = ROAD_Y - 2;
+      ctx.fillStyle = '#666';
+      ctx.fillRect(t.x + 5, baseY - t.h, 3, t.h);
+      ctx.fillStyle = '#FFD700';
+      ctx.beginPath();
+      ctx.arc(t.x + 6, baseY - t.h - 3, 5, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    return;
+  }
+
+  if (currentTheme === 'desert') {
+    // Cacti
+    trees.forEach(t => {
+      const baseY = ROAD_Y - 2;
+      ctx.fillStyle = '#2E8B57';
+      ctx.fillRect(t.x + 5, baseY - t.h * 0.7, 6, t.h * 0.7);
+      // Arms
+      ctx.fillRect(t.x + 11, baseY - t.h * 0.5, 10, 4);
+      ctx.fillRect(t.x + 17, baseY - t.h * 0.5, 4, -12);
+      ctx.fillRect(t.x - 1, baseY - t.h * 0.35, -8, 4);
+      ctx.fillRect(t.x - 5, baseY - t.h * 0.35, 4, -10);
+    });
+    return;
+  }
+
+  if (currentTheme === 'ocean') {
+    // No trees on open ocean
+    return;
+  }
+
+  if (currentTheme === 'swamp') {
+    // Dead trees and fog
+    trees.forEach(t => {
+      const baseY = ROAD_Y - 2;
+      ctx.fillStyle = '#3a2a1a';
+      ctx.fillRect(t.x + 4, baseY - t.h * 0.6, 5, t.h * 0.6);
+      // Dead branches
+      ctx.strokeStyle = '#3a2a1a';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(t.x + 6, baseY - t.h * 0.4);
+      ctx.lineTo(t.x + 18, baseY - t.h * 0.55);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(t.x + 6, baseY - t.h * 0.5);
+      ctx.lineTo(t.x - 6, baseY - t.h * 0.65);
+      ctx.stroke();
+    });
+    // Fog
+    ctx.fillStyle = 'rgba(100,120,80,0.15)';
+    ctx.fillRect(0, ROAD_Y - 40, 900, 40);
+    return;
+  }
+
+  if (currentTheme === 'racetrack') {
+    // Flags
+    trees.forEach(t => {
+      const baseY = ROAD_Y - 2;
+      ctx.fillStyle = '#888';
+      ctx.fillRect(t.x + 5, baseY - t.h * 0.8, 3, t.h * 0.8);
+      // Checkered flag
+      const flagW = 16, flagH = 10;
+      const fx = t.x + 8, fy = baseY - t.h * 0.8;
+      for (let r = 0; r < 2; r++) {
+        for (let c = 0; c < 4; c++) {
+          ctx.fillStyle = (r + c) % 2 === 0 ? '#000' : '#FFF';
+          ctx.fillRect(fx + c * 4, fy + r * 5, 4, 5);
+        }
+      }
+    });
+    return;
+  }
+
+  // Mountain trees (default)
   trees.forEach(t => {
     const baseY = ROAD_Y - 2;
-    // Trunk
     ctx.fillStyle = '#5D4037';
     ctx.fillRect(t.x + 4, baseY - t.h * 0.4, 6, t.h * 0.4);
-    // Foliage
     ctx.fillStyle = t.type === 0 ? '#2E7D32' : t.type === 1 ? '#388E3C' : '#1B5E20';
     ctx.beginPath();
     ctx.moveTo(t.x + 7, baseY - t.h);
@@ -584,18 +827,17 @@ function drawTrees() {
 }
 
 function drawRoad() {
-  // Draw each lane with distinct color
+  const theme = THEMES[currentTheme];
+  const laneColors = theme.laneColors;
+
   for (let i = 0; i < 3; i++) {
     const laneY = ROAD_Y + i * LANE_H;
-    ctx.fillStyle = LANE_COLORS[i];
+    ctx.fillStyle = laneColors[i];
     ctx.fillRect(0, laneY, 900, LANE_H);
 
-    // Highlight active lane
     if (i === jeep.lane && state === STATE.PLAYING) {
       ctx.fillStyle = LANE_HIGHLIGHT;
       ctx.fillRect(0, laneY, 900, LANE_H);
-
-      // Left-side lane indicator arrow
       ctx.fillStyle = 'rgba(255, 215, 0, 0.35)';
       const arrowX = 10;
       const arrowCenterY = laneY + LANE_H / 2;
@@ -608,14 +850,26 @@ function drawRoad() {
   }
 
   // Road edges
-  ctx.fillStyle = '#FFA500';
+  ctx.fillStyle = theme.roadEdge;
   ctx.fillRect(0, ROAD_Y, 900, 3);
   ctx.fillRect(0, ROAD_Y + ROAD_H - 3, 900, 3);
 
-  // Lane dividers - solid white lines
-  ctx.strokeStyle = 'rgba(255,255,255,0.4)';
-  ctx.lineWidth = 2;
-  ctx.setLineDash([20, 15]);
+  // Lane dividers
+  if (currentTheme === 'ocean') {
+    // Wave foam dividers
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([30, 20]);
+  } else if (currentTheme === 'racetrack') {
+    // Solid white lines
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+    ctx.lineWidth = 3;
+    ctx.setLineDash([]);
+  } else {
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([20, 15]);
+  }
   for (let i = 1; i < 3; i++) {
     ctx.beginPath();
     ctx.moveTo(0, ROAD_Y + i * LANE_H);
@@ -624,10 +878,50 @@ function drawRoad() {
   }
   ctx.setLineDash([]);
 
+  // Ocean: add wave shimmer on road
+  if (currentTheme === 'ocean') {
+    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 5; i++) {
+      ctx.beginPath();
+      for (let wx = 0; wx < 900; wx += 5) {
+        const wy = ROAD_Y + 20 + i * 35 + Math.sin((wx + frameCount * 2) * 0.06) * 4;
+        if (wx === 0) ctx.moveTo(wx, wy); else ctx.lineTo(wx, wy);
+      }
+      ctx.stroke();
+    }
+  }
+
+  // Swamp: add fog/bubbles on road
+  if (currentTheme === 'swamp') {
+    ctx.fillStyle = 'rgba(80,100,40,0.15)';
+    ctx.fillRect(0, ROAD_Y, 900, ROAD_H);
+    // Bubbles
+    if (frameCount % 10 === 0) {
+      ctx.fillStyle = 'rgba(100,130,50,0.3)';
+      for (let i = 0; i < 3; i++) {
+        const bx = Math.random() * 900;
+        const by = ROAD_Y + Math.random() * ROAD_H;
+        ctx.beginPath();
+        ctx.arc(bx, by, 3 + Math.random() * 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  // Racetrack: curb markings
+  if (currentTheme === 'racetrack') {
+    for (let cx = 0; cx < 900; cx += 20) {
+      ctx.fillStyle = ((cx / 20) % 2 === 0) ? '#FF0000' : '#FFFFFF';
+      ctx.fillRect(cx, ROAD_Y, 10, 3);
+      ctx.fillRect(cx, ROAD_Y + ROAD_H - 3, 10, 3);
+    }
+  }
+
   // Below road
   const belowGrad = ctx.createLinearGradient(0, ROAD_Y + ROAD_H, 0, 580);
-  belowGrad.addColorStop(0, '#4A3728');
-  belowGrad.addColorStop(1, '#2D1F14');
+  belowGrad.addColorStop(0, theme.belowRoad[0]);
+  belowGrad.addColorStop(1, theme.belowRoad[1]);
   ctx.fillStyle = belowGrad;
   ctx.fillRect(0, ROAD_Y + ROAD_H, 900, 580 - ROAD_Y - ROAD_H);
 }
@@ -671,14 +965,12 @@ function drawObstacle(obs) {
       break;
 
     case 'FALLEN_TREE':
-      // Trunk
       ctx.fillStyle = '#5D4037';
       ctx.save();
       ctx.translate(obs.x + obs.w/2, obs.y + obs.h);
       ctx.rotate(-0.5);
       ctx.fillRect(-obs.w/2, -12, obs.w, 14);
       ctx.restore();
-      // Branches
       ctx.fillStyle = '#2E7D32';
       ctx.beginPath();
       ctx.arc(obs.x + obs.w - 10, obs.y + 10, 20, 0, Math.PI*2);
@@ -692,7 +984,6 @@ function drawObstacle(obs) {
     case 'WATER':
       ctx.fillStyle = 'rgba(52, 152, 219, 0.5)';
       ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
-      // Waves
       ctx.strokeStyle = 'rgba(255,255,255,0.3)';
       ctx.lineWidth = 2;
       for (let i = 0; i < 3; i++) {
@@ -708,7 +999,6 @@ function drawObstacle(obs) {
     case 'MUD':
       ctx.fillStyle = 'rgba(139, 105, 20, 0.6)';
       ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
-      // Mud blobs
       ctx.fillStyle = 'rgba(101, 67, 33, 0.5)';
       for (let i = 0; i < 5; i++) {
         const mx = obs.x + 15 + (i * 20) % obs.w;
@@ -720,13 +1010,11 @@ function drawObstacle(obs) {
       break;
 
     case 'GAP':
-      ctx.fillStyle = '#1a1a2e';
+      ctx.fillStyle = currentTheme === 'ocean' ? '#0a2a3c' : '#1a1a2e';
       ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
-      // Edges
-      ctx.fillStyle = '#3a2a1a';
+      ctx.fillStyle = currentTheme === 'ocean' ? '#1a4a5a' : '#3a2a1a';
       ctx.fillRect(obs.x - 3, obs.y, 6, obs.h);
       ctx.fillRect(obs.x + obs.w - 3, obs.y, 6, obs.h);
-      // Depth shading
       const gapGrad = ctx.createLinearGradient(obs.x, obs.y, obs.x, obs.y + obs.h);
       gapGrad.addColorStop(0, 'rgba(0,0,0,0)');
       gapGrad.addColorStop(1, 'rgba(0,0,0,0.8)');
@@ -737,7 +1025,6 @@ function drawObstacle(obs) {
     case 'ICE':
       ctx.fillStyle = 'rgba(168, 216, 234, 0.5)';
       ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
-      // Shine
       ctx.fillStyle = 'rgba(255,255,255,0.3)';
       for (let i = 0; i < 4; i++) {
         ctx.fillRect(obs.x + 10 + i * 25, obs.y + 10 + (i % 2) * 40, 15, 3);
@@ -758,7 +1045,6 @@ function drawObstacle(obs) {
       ctx.lineTo(obs.x + obs.w, obs.y + obs.h * 0.3);
       ctx.lineTo(obs.x + obs.w, obs.y);
       ctx.fill();
-      // Stripes
       ctx.fillStyle = '#FFD700';
       for (let i = 0; i < 3; i++) {
         const sx = obs.x + 5 + i * 15;
@@ -767,30 +1053,24 @@ function drawObstacle(obs) {
       break;
 
     case 'MELTED_LOLLY':
-      // Melted ice lolly puddle - pink/red sticky mess
-      // Main puddle
       ctx.fillStyle = 'rgba(255, 105, 180, 0.6)';
       ctx.beginPath();
       ctx.ellipse(obs.x + obs.w/2, obs.y + obs.h/2, obs.w/2, obs.h/2.5, 0.1, 0, Math.PI*2);
       ctx.fill();
-      // Darker center
       ctx.fillStyle = 'rgba(220, 60, 120, 0.5)';
       ctx.beginPath();
       ctx.ellipse(obs.x + obs.w/2 - 5, obs.y + obs.h/2, obs.w/4, obs.h/3.5, -0.2, 0, Math.PI*2);
       ctx.fill();
-      // Popsicle stick
       ctx.fillStyle = '#D2B48C';
       ctx.save();
       ctx.translate(obs.x + obs.w/2 + 8, obs.y + obs.h/2 - 2);
       ctx.rotate(0.4);
       ctx.fillRect(-2, -12, 4, 18);
       ctx.restore();
-      // Shine spots (sticky)
       ctx.fillStyle = 'rgba(255,255,255,0.4)';
       ctx.beginPath();
       ctx.arc(obs.x + obs.w/2 - 8, obs.y + obs.h/2 - 3, 3, 0, Math.PI*2);
       ctx.fill();
-      // Drip trails
       ctx.fillStyle = 'rgba(255, 105, 180, 0.3)';
       ctx.beginPath();
       ctx.ellipse(obs.x + obs.w/2 + 15, obs.y + obs.h/2 + 5, 6, 3, 0.5, 0, Math.PI*2);
@@ -798,54 +1078,232 @@ function drawObstacle(obs) {
       break;
 
     case 'SMOOTHIE':
-      // Spilled smoothie - purple/green splat
-      // Main spill
       ctx.fillStyle = 'rgba(155, 89, 182, 0.55)';
       ctx.beginPath();
       ctx.ellipse(obs.x + obs.w/2, obs.y + obs.h/2, obs.w/2, obs.h/2.2, -0.15, 0, Math.PI*2);
       ctx.fill();
-      // Berry chunks
       ctx.fillStyle = 'rgba(120, 40, 140, 0.5)';
       for (let i = 0; i < 4; i++) {
         ctx.beginPath();
         ctx.arc(obs.x + 10 + i * 12, obs.y + obs.h/2 + (i%2 ? 3 : -3), 3, 0, Math.PI*2);
         ctx.fill();
       }
-      // Green kiwi bits
       ctx.fillStyle = 'rgba(100, 180, 60, 0.5)';
       ctx.beginPath();
       ctx.arc(obs.x + obs.w/2 + 5, obs.y + obs.h/2 - 2, 4, 0, Math.PI*2);
       ctx.fill();
-      // Toppled cup
       ctx.fillStyle = 'rgba(200, 200, 200, 0.7)';
       ctx.save();
       ctx.translate(obs.x + obs.w/2 - 10, obs.y + obs.h/2);
       ctx.rotate(-1.2);
       ctx.fillRect(-5, -10, 10, 16);
       ctx.restore();
-      // Straw
       ctx.strokeStyle = '#E74C3C';
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(obs.x + obs.w/2 - 12, obs.y + obs.h/2 - 8);
       ctx.lineTo(obs.x + obs.w/2 - 18, obs.y + obs.h/2 - 18);
       ctx.stroke();
-      // Shine
       ctx.fillStyle = 'rgba(255,255,255,0.3)';
       ctx.beginPath();
       ctx.ellipse(obs.x + obs.w/2 + 8, obs.y + obs.h/2 - 4, 5, 2, 0, 0, Math.PI*2);
+      ctx.fill();
+      break;
+
+    // City obstacles
+    case 'POTHOLE':
+      ctx.fillStyle = '#333';
+      ctx.beginPath();
+      ctx.ellipse(obs.x + obs.w/2, obs.y + obs.h/2, obs.w/2, obs.h/2.5, 0, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#222';
+      ctx.beginPath();
+      ctx.ellipse(obs.x + obs.w/2, obs.y + obs.h/2 + 2, obs.w/3, obs.h/3.5, 0, 0, Math.PI*2);
+      ctx.fill();
+      break;
+
+    case 'CONE':
+      ctx.fillStyle = '#FF6600';
+      ctx.beginPath();
+      ctx.moveTo(obs.x + obs.w/2, obs.y);
+      ctx.lineTo(obs.x + obs.w - 3, obs.y + obs.h);
+      ctx.lineTo(obs.x + 3, obs.y + obs.h);
+      ctx.fill();
+      // White stripes
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(obs.x + 6, obs.y + obs.h * 0.4, obs.w - 12, 4);
+      ctx.fillRect(obs.x + 8, obs.y + obs.h * 0.65, obs.w - 16, 3);
+      // Base
+      ctx.fillStyle = '#FF4400';
+      ctx.fillRect(obs.x, obs.y + obs.h - 5, obs.w, 5);
+      break;
+
+    // Desert obstacles
+    case 'CACTUS':
+      ctx.fillStyle = '#2E8B57';
+      // Main trunk
+      ctx.fillRect(obs.x + obs.w/2 - 5, obs.y + 5, 10, obs.h - 5);
+      // Arms
+      ctx.fillRect(obs.x + obs.w/2 + 5, obs.y + 15, 12, 5);
+      ctx.fillRect(obs.x + obs.w/2 + 12, obs.y + 5, 5, 15);
+      ctx.fillRect(obs.x + obs.w/2 - 17, obs.y + 20, 12, 5);
+      ctx.fillRect(obs.x + obs.w/2 - 17, obs.y + 12, 5, 13);
+      // Spines
+      ctx.fillStyle = '#90EE90';
+      for (let i = 0; i < 5; i++) {
+        ctx.fillRect(obs.x + obs.w/2 - 6, obs.y + 8 + i * 8, 1, 3);
+        ctx.fillRect(obs.x + obs.w/2 + 5, obs.y + 10 + i * 7, 1, 3);
+      }
+      break;
+
+    case 'TUMBLEWEED':
+      ctx.fillStyle = '#C4A35A';
+      ctx.beginPath();
+      ctx.arc(obs.x + obs.w/2, obs.y + obs.h/2, obs.w/2.2, 0, Math.PI*2);
+      ctx.fill();
+      // Tangled lines
+      ctx.strokeStyle = '#8B7332';
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 6; i++) {
+        const a = (frameCount * 0.02 + i) * 1.1;
+        ctx.beginPath();
+        ctx.arc(obs.x + obs.w/2, obs.y + obs.h/2, obs.w/3, a, a + 1.5);
+        ctx.stroke();
+      }
+      ctx.fillStyle = '#B89940';
+      ctx.beginPath();
+      ctx.arc(obs.x + obs.w/2, obs.y + obs.h/2, obs.w/3.5, 0, Math.PI*2);
+      ctx.fill();
+      break;
+
+    // Ocean obstacles (islands with palm trees)
+    case 'ISLAND':
+      // Sand island
+      ctx.fillStyle = '#D4A45A';
+      ctx.beginPath();
+      ctx.ellipse(obs.x + obs.w/2, obs.y + obs.h - 5, obs.w/2, obs.h/3, 0, 0, Math.PI*2);
+      ctx.fill();
+      // Lighter sand
+      ctx.fillStyle = '#E8C87A';
+      ctx.beginPath();
+      ctx.ellipse(obs.x + obs.w/2, obs.y + obs.h - 8, obs.w/3, obs.h/5, 0, 0, Math.PI*2);
+      ctx.fill();
+      // Palm tree trunk
+      ctx.strokeStyle = '#8B6914';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(obs.x + obs.w/2, obs.y + obs.h - 10);
+      ctx.quadraticCurveTo(obs.x + obs.w/2 + 8, obs.y + obs.h/2, obs.x + obs.w/2 + 5, obs.y + 8);
+      ctx.stroke();
+      // Palm leaves
+      ctx.fillStyle = '#228B22';
+      const palmTop = obs.y + 5;
+      const palmCx = obs.x + obs.w/2 + 5;
+      for (let a = 0; a < 5; a++) {
+        const angle = (a / 5) * Math.PI * 2 + 0.3;
+        ctx.beginPath();
+        ctx.ellipse(palmCx + Math.cos(angle) * 12, palmTop + Math.sin(angle) * 6, 14, 4, angle, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // Coconuts
+      ctx.fillStyle = '#8B4513';
+      ctx.beginPath();
+      ctx.arc(palmCx - 3, palmTop + 4, 3, 0, Math.PI*2);
+      ctx.arc(palmCx + 4, palmTop + 5, 3, 0, Math.PI*2);
+      ctx.fill();
+      break;
+
+    // Swamp obstacles (bones)
+    case 'BONE_PILE':
+      ctx.fillStyle = '#E8DCC8';
+      // Scattered bones
+      ctx.save();
+      ctx.translate(obs.x + obs.w/2, obs.y + obs.h/2);
+      for (let i = 0; i < 4; i++) {
+        ctx.save();
+        ctx.rotate(i * 0.8 + 0.3);
+        // Bone shape
+        ctx.fillRect(-12, -2, 24, 4);
+        ctx.beginPath();
+        ctx.arc(-12, 0, 4, 0, Math.PI*2);
+        ctx.arc(12, 0, 4, 0, Math.PI*2);
+        ctx.fill();
+        ctx.restore();
+      }
+      ctx.restore();
+      break;
+
+    case 'SKULL':
+      ctx.fillStyle = '#F0E6D3';
+      // Skull shape
+      ctx.beginPath();
+      ctx.arc(obs.x + obs.w/2, obs.y + obs.h/2 - 3, obs.w/2.5, 0, Math.PI*2);
+      ctx.fill();
+      // Jaw
+      ctx.beginPath();
+      ctx.ellipse(obs.x + obs.w/2, obs.y + obs.h/2 + 8, obs.w/3.5, 6, 0, 0, Math.PI);
+      ctx.fill();
+      // Eyes
+      ctx.fillStyle = '#1a1a1a';
+      ctx.beginPath();
+      ctx.arc(obs.x + obs.w/2 - 6, obs.y + obs.h/2 - 5, 4, 0, Math.PI*2);
+      ctx.arc(obs.x + obs.w/2 + 6, obs.y + obs.h/2 - 5, 4, 0, Math.PI*2);
+      ctx.fill();
+      // Nose
+      ctx.beginPath();
+      ctx.moveTo(obs.x + obs.w/2 - 2, obs.y + obs.h/2 + 1);
+      ctx.lineTo(obs.x + obs.w/2 + 2, obs.y + obs.h/2 + 1);
+      ctx.lineTo(obs.x + obs.w/2, obs.y + obs.h/2 + 5);
+      ctx.fill();
+      // Teeth
+      ctx.fillStyle = '#F0E6D3';
+      for (let t = -2; t <= 2; t++) {
+        ctx.fillRect(obs.x + obs.w/2 + t * 4 - 1, obs.y + obs.h/2 + 8, 3, 4);
+      }
+      break;
+
+    // Racetrack obstacles
+    case 'TIRE_WALL':
+      for (let row = 0; row < 2; row++) {
+        for (let col = 0; col < 3; col++) {
+          ctx.fillStyle = '#222';
+          ctx.beginPath();
+          ctx.arc(obs.x + 8 + col * 14, obs.y + 10 + row * 16, 7, 0, Math.PI*2);
+          ctx.fill();
+          ctx.fillStyle = '#444';
+          ctx.beginPath();
+          ctx.arc(obs.x + 8 + col * 14, obs.y + 10 + row * 16, 3, 0, Math.PI*2);
+          ctx.fill();
+        }
+      }
+      break;
+
+    case 'OIL_SPILL':
+      ctx.fillStyle = 'rgba(20,20,30,0.7)';
+      ctx.beginPath();
+      ctx.ellipse(obs.x + obs.w/2, obs.y + obs.h/2, obs.w/2, obs.h/2, 0, 0, Math.PI*2);
+      ctx.fill();
+      // Rainbow sheen
+      ctx.fillStyle = 'rgba(100,50,150,0.2)';
+      ctx.beginPath();
+      ctx.ellipse(obs.x + obs.w/2 - 5, obs.y + obs.h/2 - 2, obs.w/3, obs.h/3, 0.3, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(50,150,100,0.15)';
+      ctx.beginPath();
+      ctx.ellipse(obs.x + obs.w/2 + 8, obs.y + obs.h/2 + 1, obs.w/4, obs.h/4, -0.2, 0, Math.PI*2);
       ctx.fill();
       break;
   }
   ctx.restore();
 }
 
+// ============ VEHICLE DRAWING ============
+
 function drawJeep() {
   ctx.save();
   const jx = jeep.x;
   const jy = jeep.y;
 
-  // Flash when invincible
   if (jeep.invincible > 0 && Math.floor(frameCount / 4) % 2 === 0) {
     ctx.globalAlpha = 0.4;
   }
@@ -854,50 +1312,52 @@ function drawJeep() {
   ctx.rotate(jeep.tilt);
   ctx.translate(-jeep.w/2, -jeep.h/2);
 
+  if (currentTheme === 'ocean') {
+    drawShip();
+  } else if (currentTheme === 'swamp') {
+    drawMotorbike();
+  } else if (currentTheme === 'racetrack') {
+    drawF1Car();
+  } else {
+    drawJeepVehicle();
+  }
+
+  ctx.restore();
+}
+
+function drawJeepVehicle() {
   // Shadow
   ctx.fillStyle = 'rgba(0,0,0,0.2)';
   ctx.beginPath();
   ctx.ellipse(jeep.w/2, jeep.h + 5, jeep.w/2 - 5, 6, 0, 0, Math.PI*2);
   ctx.fill();
-
   // Body
   ctx.fillStyle = '#2E7D32';
-  // Lower body
   ctx.fillRect(5, 15, 60, 22);
-  // Upper body / cabin
   ctx.fillStyle = '#388E3C';
   ctx.fillRect(20, 4, 35, 16);
-  // Roof
   ctx.fillStyle = '#1B5E20';
   ctx.fillRect(22, 2, 31, 5);
-
   // Windshield
   ctx.fillStyle = 'rgba(135,206,250,0.7)';
   ctx.beginPath();
   ctx.moveTo(52, 5);
   ctx.lineTo(57, 15);
   ctx.lineTo(52, 15);
-  ctx.lineTo(52, 5);
   ctx.fill();
-
   // Rear window
   ctx.fillStyle = 'rgba(135,206,250,0.5)';
   ctx.fillRect(22, 6, 8, 10);
-
   // Bumpers
   ctx.fillStyle = '#444';
   ctx.fillRect(0, 20, 8, 12);
   ctx.fillRect(62, 20, 8, 12);
-
-  // Headlight
+  // Lights
   ctx.fillStyle = '#FFD700';
   ctx.fillRect(63, 22, 5, 5);
-
-  // Tail light
   ctx.fillStyle = '#FF0000';
   ctx.fillRect(2, 22, 4, 4);
-
-  // Spare tire hint on back
+  // Spare tire
   ctx.fillStyle = '#333';
   ctx.beginPath();
   ctx.arc(5, 14, 6, 0, Math.PI*2);
@@ -906,7 +1366,6 @@ function drawJeep() {
   ctx.beginPath();
   ctx.arc(5, 14, 3, 0, Math.PI*2);
   ctx.fill();
-
   // Wheels
   jeep.wheelAngle += speed * 0.15;
   const drawWheel = (wx, wy) => {
@@ -918,7 +1377,6 @@ function drawJeep() {
     ctx.beginPath();
     ctx.arc(wx, wy, 5, 0, Math.PI*2);
     ctx.fill();
-    // Spokes
     ctx.strokeStyle = '#333';
     ctx.lineWidth = 1.5;
     for (let s = 0; s < 4; s++) {
@@ -931,30 +1389,265 @@ function drawJeep() {
   };
   drawWheel(17, 40);
   drawWheel(53, 40);
-
-  // Snorkel (exhaust pipe)
+  // Snorkel
   ctx.fillStyle = '#555';
   ctx.fillRect(55, 0, 3, 8);
+}
 
-  ctx.restore();
+function drawShip() {
+  // Shadow / water reflection
+  ctx.fillStyle = 'rgba(0,0,50,0.2)';
+  ctx.beginPath();
+  ctx.ellipse(jeep.w/2, jeep.h + 3, jeep.w/2 + 5, 5, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // Hull
+  ctx.fillStyle = '#8B4513';
+  ctx.beginPath();
+  ctx.moveTo(0, 20);
+  ctx.lineTo(10, 38);
+  ctx.lineTo(60, 38);
+  ctx.lineTo(70, 20);
+  ctx.lineTo(65, 15);
+  ctx.lineTo(5, 15);
+  ctx.closePath();
+  ctx.fill();
+
+  // Hull stripe
+  ctx.fillStyle = '#A0522D';
+  ctx.beginPath();
+  ctx.moveTo(5, 20);
+  ctx.lineTo(12, 32);
+  ctx.lineTo(58, 32);
+  ctx.lineTo(65, 20);
+  ctx.closePath();
+  ctx.fill();
+
+  // Deck
+  ctx.fillStyle = '#D2B48C';
+  ctx.fillRect(8, 13, 54, 7);
+
+  // Mast
+  ctx.fillStyle = '#5D3A1A';
+  ctx.fillRect(33, -5, 4, 22);
+
+  // Sail
+  ctx.fillStyle = '#FFFFFF';
+  ctx.beginPath();
+  ctx.moveTo(37, -3);
+  ctx.lineTo(60, 5);
+  ctx.lineTo(37, 13);
+  ctx.fill();
+
+  // Flag
+  ctx.fillStyle = '#FF0000';
+  ctx.beginPath();
+  ctx.moveTo(35, -5);
+  ctx.lineTo(45, -8);
+  ctx.lineTo(35, -11);
+  ctx.fill();
+
+  // Portholes
+  ctx.fillStyle = '#FFD700';
+  ctx.beginPath();
+  ctx.arc(20, 24, 3, 0, Math.PI*2);
+  ctx.arc(35, 24, 3, 0, Math.PI*2);
+  ctx.arc(50, 24, 3, 0, Math.PI*2);
+  ctx.fill();
+
+  // Bow wave
+  if (frameCount % 3 === 0) {
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.beginPath();
+    ctx.arc(68, 28, 4 + Math.sin(frameCount * 0.2) * 2, 0, Math.PI*2);
+    ctx.fill();
+  }
+}
+
+function drawMotorbike() {
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.beginPath();
+  ctx.ellipse(jeep.w/2, jeep.h + 3, jeep.w/3, 4, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // Back wheel
+  jeep.wheelAngle += speed * 0.2;
+  ctx.fillStyle = '#222';
+  ctx.beginPath();
+  ctx.arc(18, 36, 9, 0, Math.PI*2);
+  ctx.fill();
+  ctx.fillStyle = '#444';
+  ctx.beginPath();
+  ctx.arc(18, 36, 4, 0, Math.PI*2);
+  ctx.fill();
+
+  // Front wheel
+  ctx.fillStyle = '#222';
+  ctx.beginPath();
+  ctx.arc(55, 36, 9, 0, Math.PI*2);
+  ctx.fill();
+  ctx.fillStyle = '#444';
+  ctx.beginPath();
+  ctx.arc(55, 36, 4, 0, Math.PI*2);
+  ctx.fill();
+
+  // Frame
+  ctx.strokeStyle = '#333';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(18, 36);
+  ctx.lineTo(30, 20);
+  ctx.lineTo(50, 20);
+  ctx.lineTo(55, 36);
+  ctx.stroke();
+
+  // Engine
+  ctx.fillStyle = '#555';
+  ctx.fillRect(25, 24, 18, 10);
+
+  // Tank
+  ctx.fillStyle = '#CC0000';
+  ctx.beginPath();
+  ctx.ellipse(38, 18, 12, 6, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // Seat
+  ctx.fillStyle = '#1a1a1a';
+  ctx.fillRect(26, 13, 16, 5);
+
+  // Handlebars
+  ctx.strokeStyle = '#666';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(48, 20);
+  ctx.lineTo(52, 10);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(50, 11);
+  ctx.lineTo(56, 9);
+  ctx.stroke();
+
+  // Headlight
+  ctx.fillStyle = '#FFD700';
+  ctx.beginPath();
+  ctx.arc(56, 28, 3, 0, Math.PI*2);
+  ctx.fill();
+
+  // Exhaust
+  ctx.fillStyle = '#777';
+  ctx.fillRect(5, 30, 15, 3);
+
+  // Mud guard
+  ctx.fillStyle = '#CC0000';
+  ctx.beginPath();
+  ctx.arc(18, 36, 12, Math.PI, 0);
+  ctx.lineTo(30, 32);
+  ctx.fill();
+}
+
+function drawF1Car() {
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.beginPath();
+  ctx.ellipse(jeep.w/2, jeep.h + 3, jeep.w/2, 5, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // Rear wing
+  ctx.fillStyle = '#FF0000';
+  ctx.fillRect(0, 10, 5, 3);
+  ctx.fillStyle = '#CC0000';
+  ctx.fillRect(-2, 8, 9, 3);
+  // Wing supports
+  ctx.fillStyle = '#333';
+  ctx.fillRect(1, 13, 2, 8);
+  ctx.fillRect(5, 13, 2, 8);
+
+  // Main body
+  ctx.fillStyle = '#FF0000';
+  ctx.beginPath();
+  ctx.moveTo(8, 28);
+  ctx.lineTo(8, 18);
+  ctx.lineTo(25, 14);
+  ctx.lineTo(55, 12);
+  ctx.lineTo(68, 18);
+  ctx.lineTo(70, 22);
+  ctx.lineTo(68, 28);
+  ctx.lineTo(8, 28);
+  ctx.fill();
+
+  // Cockpit
+  ctx.fillStyle = '#111';
+  ctx.beginPath();
+  ctx.ellipse(38, 18, 10, 5, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // Driver helmet
+  ctx.fillStyle = '#FFFFFF';
+  ctx.beginPath();
+  ctx.arc(38, 15, 5, 0, Math.PI*2);
+  ctx.fill();
+  ctx.fillStyle = '#0000FF';
+  ctx.beginPath();
+  ctx.arc(38, 15, 5, -0.5, 1.5);
+  ctx.fill();
+
+  // Front wing
+  ctx.fillStyle = '#FF0000';
+  ctx.fillRect(63, 26, 8, 2);
+  ctx.fillStyle = '#CC0000';
+  ctx.fillRect(62, 24, 10, 2);
+
+  // Nose
+  ctx.fillStyle = '#FF2200';
+  ctx.beginPath();
+  ctx.moveTo(55, 16);
+  ctx.lineTo(70, 20);
+  ctx.lineTo(68, 24);
+  ctx.lineTo(55, 24);
+  ctx.fill();
+
+  // Wheels
+  jeep.wheelAngle += speed * 0.25;
+  const drawF1Wheel = (wx, wy) => {
+    ctx.fillStyle = '#111';
+    ctx.fillRect(wx - 5, wy - 8, 10, 16);
+    ctx.fillStyle = '#333';
+    ctx.fillRect(wx - 3, wy - 6, 6, 12);
+    // Tire marks
+    for (let s = 0; s < 3; s++) {
+      const a = jeep.wheelAngle + s * Math.PI / 1.5;
+      const sy = wy + Math.sin(a) * 5;
+      ctx.fillStyle = '#222';
+      ctx.fillRect(wx - 4, sy - 1, 8, 2);
+    }
+  };
+  drawF1Wheel(12, 28);
+  drawF1Wheel(58, 28);
+
+  // Number
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = 'bold 10px sans-serif';
+  ctx.fillText('1', 28, 24);
+
+  // Side intake
+  ctx.fillStyle = '#AA0000';
+  ctx.fillRect(20, 14, 8, 4);
 }
 
 function drawParticles() {
-  // Dust particles
   dustParticles.forEach(p => {
     ctx.fillStyle = `rgba(${p.r},${p.g},${p.b},${p.alpha})`;
     ctx.beginPath();
     ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
     ctx.fill();
   });
-  // Splash particles
   splashParticles.forEach(p => {
     ctx.fillStyle = `rgba(52,152,219,${p.alpha})`;
     ctx.beginPath();
     ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
     ctx.fill();
   });
-  // Hit particles
   particles.forEach(p => {
     ctx.fillStyle = `rgba(255,${p.g},0,${p.alpha})`;
     ctx.beginPath();
@@ -964,37 +1657,29 @@ function drawParticles() {
 }
 
 function drawLives() {
-  // Draw hearts in HUD
   let livesStr = '';
   for (let i = 0; i < jeep.maxLives; i++) {
     livesStr += i < jeep.lives ? '❤️' : '🖤';
   }
   hudLives.textContent = livesStr;
-
-  // Also draw on canvas for visibility
   ctx.font = '24px sans-serif';
   for (let i = 0; i < jeep.maxLives; i++) {
     ctx.fillText(i < jeep.lives ? '❤️' : '🖤', 20 + i * 30, 565);
   }
-
   // Turbo gauge
   const gaugeX = 130;
   const gaugeY = 553;
   const gaugeW = 100;
   const gaugeH = 10;
   const fuel = jeep.turboFuel / 100;
-  // Background
   ctx.fillStyle = 'rgba(0,0,0,0.4)';
   ctx.fillRect(gaugeX, gaugeY, gaugeW, gaugeH);
-  // Fill
   const turboColor = fuel > 0.3 ? '#FF8C00' : '#FF3333';
   ctx.fillStyle = jeep.turbo ? '#FFAA00' : turboColor;
   ctx.fillRect(gaugeX, gaugeY, gaugeW * fuel, gaugeH);
-  // Border
   ctx.strokeStyle = 'rgba(255,255,255,0.5)';
   ctx.lineWidth = 1;
   ctx.strokeRect(gaugeX, gaugeY, gaugeW, gaugeH);
-  // Label
   ctx.fillStyle = 'white';
   ctx.font = 'bold 11px sans-serif';
   ctx.fillText('TURBO', gaugeX + gaugeW + 6, gaugeY + 9);
@@ -1010,7 +1695,8 @@ function drawWarning(text) {
   ctx.textAlign = 'left';
 }
 
-// Update functions
+// ============ UPDATE FUNCTIONS ============
+
 function updateParallax() {
   mountains1.forEach(m => {
     m.x -= speed * 0.3;
@@ -1031,18 +1717,16 @@ function updateParallax() {
 }
 
 function updateJeep() {
-  // Lane movement
   const targetY = ROAD_Y + jeep.lane * LANE_H + (LANE_H - jeep.h) / 2;
   const isSlippery = jeep.onIce || jeep.onMud || jeep.onSlippery;
 
-  // ArrowLeft/Right = switch lanes
   if (keys['ArrowLeft'] && jeep.grounded && !jeep.laneKeyHeld) {
     if (isSlippery) {
       const slip = Math.random();
       if (slip < 0.3 && jeep.lane > 1) {
         jeep.lane -= 2;
       } else if (slip < 0.5) {
-        // no movement - slip!
+        // slip
       } else if (jeep.lane > 0) {
         jeep.lane--;
       }
@@ -1058,7 +1742,7 @@ function updateJeep() {
       if (slip < 0.3 && jeep.lane < 1) {
         jeep.lane += 2;
       } else if (slip < 0.5) {
-        // no movement - slip!
+        // slip
       } else if (jeep.lane < 2) {
         jeep.lane++;
       }
@@ -1072,7 +1756,6 @@ function updateJeep() {
     jeep.laneKeyHeld = false;
   }
 
-  // ArrowUp = jump
   if (keys['ArrowUp'] && jeep.grounded) {
     jeep.vy = -10;
     jeep.grounded = false;
@@ -1080,8 +1763,6 @@ function updateJeep() {
     keys['ArrowUp'] = false;
     playJumpSound();
   }
-
-  // Space also jumps
   if (keys[' '] && jeep.grounded) {
     jeep.vy = -10;
     jeep.grounded = false;
@@ -1090,13 +1771,11 @@ function updateJeep() {
     playJumpSound();
   }
 
-  // ArrowDown = turbo boost
   if (keys['ArrowDown'] && jeep.turboFuel > 0) {
     jeep.turbo = true;
     jeep.turboFuel = Math.max(0, jeep.turboFuel - 0.8);
     speed = Math.min(baseSpeed * 2, speed + 0.3);
     startTurboSound();
-    // Turbo flame particles from exhaust
     if (frameCount % 2 === 0) {
       for (let i = 0; i < 3; i++) {
         dustParticles.push({
@@ -1114,11 +1793,9 @@ function updateJeep() {
     if (jeep.turbo) stopTurboSound();
     jeep.turbo = false;
     speed += (baseSpeed - speed) * 0.02;
-    // Recharge turbo when not using it
     if (jeep.turboFuel < 100) jeep.turboFuel += 0.2;
   }
 
-  // Gravity
   if (!jeep.grounded) {
     jeep.vy += 0.5;
     jeep.y += jeep.vy;
@@ -1128,7 +1805,6 @@ function updateJeep() {
       jeep.vy = 0;
       jeep.grounded = true;
       jeep.tilt = 0;
-      // Landing dust
       for (let i = 0; i < 6; i++) {
         dustParticles.push({
           x: jeep.x + 15 + Math.random() * 40,
@@ -1147,24 +1823,20 @@ function updateJeep() {
     jeep.y += diff * laneSpeed;
     jeep.groundY = jeep.y;
 
-    // Ice: random lateral drift
     if (jeep.onIce && frameCount % 30 === 0 && Math.random() < 0.4) {
       const drift = Math.random() < 0.5 ? -1 : 1;
       jeep.lane = Math.max(0, Math.min(2, jeep.lane + drift));
     }
-    // Mud: random lane wobble
     if (jeep.onMud && frameCount % 40 === 0 && Math.random() < 0.3) {
       const drift = Math.random() < 0.5 ? -1 : 1;
       jeep.lane = Math.max(0, Math.min(2, jeep.lane + drift));
     }
-    // Slippery obstacles: occasional drift
     if (jeep.onSlippery && frameCount % 25 === 0 && Math.random() < 0.35) {
       const drift = Math.random() < 0.5 ? -1 : 1;
       jeep.lane = Math.max(0, Math.min(2, jeep.lane + drift));
     }
   }
 
-  // Water slowdown
   if (jeep.inWater) {
     speed = Math.max(baseSpeed * 0.4, speed - 0.05);
     if (frameCount % 3 === 0) {
@@ -1179,7 +1851,6 @@ function updateJeep() {
     }
   }
 
-  // Mud slowdown + heavy splashing
   if (jeep.onMud) {
     speed = Math.max(baseSpeed * 0.5, speed - 0.04);
     for (let i = 0; i < 3; i++) {
@@ -1223,10 +1894,9 @@ function updateJeep() {
     }
   }
 
-  // Ice: snow particles + turbo less effective
   if (jeep.onIce) {
     if (jeep.turbo) {
-      speed = Math.min(baseSpeed * 1.3, speed); // turbo weaker on ice
+      speed = Math.min(baseSpeed * 1.3, speed);
     }
     for (let i = 0; i < 2; i++) {
       dustParticles.push({
@@ -1258,7 +1928,6 @@ function updateJeep() {
     }
   }
 
-  // Slippery surface particles (pink/purple splats)
   if (jeep.onSlippery && frameCount % 4 === 0) {
     dustParticles.push({
       x: jeep.x + 10 + Math.random() * 15,
@@ -1273,7 +1942,6 @@ function updateJeep() {
     });
   }
 
-  // Regular dust
   if (jeep.grounded && frameCount % 5 === 0 && !jeep.inWater && !jeep.onMud) {
     dustParticles.push({
       x: jeep.x + 5,
@@ -1286,22 +1954,20 @@ function updateJeep() {
     });
   }
 
-  // Invincibility timer
   if (jeep.invincible > 0) jeep.invincible--;
 
-  // Reset surface states
   jeep.inWater = false;
   jeep.onMud = false;
   jeep.onIce = false;
   jeep.onSlippery = false;
 
-  // Update engine sound
   updateEngineSound();
 }
 
 function updateObstacles() {
-  const minGap = Math.max(180, 350 - level * 20);
-  const maxGap = Math.max(250, 500 - level * 25);
+  // Wider gaps for easier jumping
+  const minGap = Math.max(280, 450 - level * 8);
+  const maxGap = Math.max(380, 600 - level * 10);
   if (obstacles.length === 0 || obstacles[obstacles.length - 1].x < 900 - minGap - Math.random() * (maxGap - minGap)) {
     spawnObstacle();
   }
@@ -1342,7 +2008,6 @@ function checkCollisions() {
           break;
       }
     } else if (obs.slippery && overlapX && overlapY) {
-      // Slippery obstacles: apply effect but don't damage
       if (!obs.passed) {
         jeep.onSlippery = true;
         obs.passed = true;
@@ -1368,20 +2033,15 @@ function checkCollisions() {
 
 function hit(deadly) {
   if (jeep.invincible > 0) return;
-
   if (deadly) {
     jeep.lives = 0;
   } else {
     jeep.lives--;
   }
-
   jeep.invincible = 60;
   shakeTimer = 15;
   shakeIntensity = deadly ? 8 : 4;
-
   playCrashSound();
-
-  // Hit particles
   for (let i = 0; i < 10; i++) {
     particles.push({
       x: jeep.x + jeep.w / 2,
@@ -1393,7 +2053,6 @@ function hit(deadly) {
       g: Math.floor(Math.random() * 200),
     });
   }
-
   if (jeep.lives <= 0) gameOver();
 }
 
@@ -1425,11 +2084,19 @@ function updateParticles() {
 function updateDifficulty() {
   score = Math.floor(frameCount * speed * 0.15);
   const newLevel = Math.floor(score / 300) + 1;
-  if (newLevel > level && newLevel <= 15) {
+  if (newLevel > level && newLevel <= 30) {
     level = newLevel;
-    baseSpeed = 3 + (level - 1) * 0.7;
+    baseSpeed = 3 + (level - 1) * 0.35;
   }
-  baseSpeed += 0.0005;
+  baseSpeed += 0.0003;
+
+  // Update theme
+  const newTheme = getTheme();
+  if (newTheme !== currentTheme) {
+    currentTheme = newTheme;
+    // Clear obstacles for clean theme transition
+    obstacles = [];
+  }
 
   hudScore.textContent = `Vzdálenost: ${score} m`;
   hudSpeed.textContent = `Rychlost: ${Math.floor(60 + (speed - 3) * 15)} km/h`;
@@ -1451,7 +2118,6 @@ function update() {
 function draw() {
   ctx.save();
 
-  // Screen shake
   if (shakeTimer > 0) {
     const sx = (Math.random() - 0.5) * shakeIntensity;
     const sy = (Math.random() - 0.5) * shakeIntensity;
@@ -1466,7 +2132,6 @@ function draw() {
   drawTrees();
   drawRoad();
 
-  // Draw obstacles behind jeep
   obstacles.forEach(obs => drawObstacle(obs));
 
   if (state === STATE.PLAYING) {
@@ -1474,7 +2139,6 @@ function draw() {
     drawParticles();
     drawLives();
 
-    // Surface indicator
     if (jeep.inWater) drawWarning('🌊 BRODĚNÍ');
     else if (jeep.onMud) drawWarning('💩 BLÁTO');
     else if (jeep.onIce) drawWarning('🧊 LED');
